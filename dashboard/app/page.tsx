@@ -32,13 +32,22 @@ export default function DashboardPage() {
 
   async function refreshAll() {
     setLoading(true);
-    const [meetingsRes, recipientsRes] = await Promise.all([
-      fetch("/api/meetings").then((r) => r.json()),
-      fetch("/api/recipients").then((r) => r.json()),
-    ]);
-    setMeetings(meetingsRes.meetings ?? []);
-    setRecipients(recipientsRes.recipients ?? []);
-    setLoading(false);
+    setStatus(null);
+    try {
+      const [meetingsRes, recipientsRes] = await Promise.all([
+        fetch("/api/meetings").then((r) => r.json()),
+        fetch("/api/recipients").then((r) => r.json()),
+      ]);
+      if (meetingsRes.error || recipientsRes.error) {
+        setStatus(`Error loading data: ${meetingsRes.error || recipientsRes.error}`);
+      }
+      setMeetings(meetingsRes.meetings ?? []);
+      setRecipients(recipientsRes.recipients ?? []);
+    } catch (err: any) {
+      setStatus(`Error loading data: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
   }
 
   function toggleMeeting(id: string) {
