@@ -38,6 +38,7 @@ function MeetingPanel({
   onToggleRecipient,
   onSelectAll,
   onAddEmail,
+  onDeleteEmail,
 }: {
   meeting: Meeting;
   allRecipients: string[];
@@ -45,6 +46,7 @@ function MeetingPanel({
   onToggleRecipient: (contextKey: string, email: string) => void;
   onSelectAll: (contextKey: string) => void;
   onAddEmail: (contextKey: string, email: string) => void;
+  onDeleteEmail: (email: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -97,13 +99,24 @@ function MeetingPanel({
               </button>
             )}
             {allRecipients.map((email) => (
-              <button
-                key={email}
-                className={`chip ${assigned.includes(email) ? "selected" : ""}`}
-                onClick={() => onToggleRecipient(meeting.contextKey, email)}
-              >
-                {email}
-              </button>
+              <span key={email} className="chip-wrap">
+                <button
+                  className={`chip ${assigned.includes(email) ? "selected" : ""}`}
+                  onClick={() => onToggleRecipient(meeting.contextKey, email)}
+                >
+                  {email}
+                </button>
+                <button
+                  className="chip-delete"
+                  title={`Remove ${email}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteEmail(email);
+                  }}
+                >
+                  &times;
+                </button>
+              </span>
             ))}
             {adding ? (
               <input
@@ -137,11 +150,13 @@ export default function DashboardPage() {
   const [statusIsError, setStatusIsError] = useState(false);
 
   useEffect(() => {
-    refreshAll();
+    refreshAll(true);
+    const interval = setInterval(() => refreshAll(false), 2 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
-  async function refreshAll() {
-    setLoading(true);
+  async function refreshAll(showLoadingScreen: boolean) {
+    if (showLoadingScreen) setLoading(true);
     setStatus(null);
     try {
       const [meetingsRes, recipientsRes, assignmentsRes] = await Promise.all([
@@ -161,7 +176,7 @@ export default function DashboardPage() {
       setStatus(`Error loading data: ${err.message}`);
       setStatusIsError(true);
     } finally {
-      setLoading(false);
+      if (showLoadingScreen) setLoading(false);
     }
   }
 
@@ -200,6 +215,23 @@ export default function DashboardPage() {
     if (!current.includes(email)) {
       persistAssignment(contextKey, [...current, email]);
     }
+  }
+
+  async function deleteEmail(email: string) {
+    const res = await fetch("/api/recipients", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    setRecipients(data.recipients ?? []);
+    setAssignments((prev) => {
+      const next: Record<string, string[]> = {};
+      for (const [key, emails] of Object.entries(prev)) {
+        next[key] = emails.filter((e) => e !== email);
+      }
+      return next;
+    });
   }
 
   async function handleSend() {
@@ -249,6 +281,7 @@ export default function DashboardPage() {
           onToggleRecipient={toggleRecipient}
           onSelectAll={selectAll}
           onAddEmail={addEmail}
+          onDeleteEmail={deleteEmail}
         />
       ))}
 
