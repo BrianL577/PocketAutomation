@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { getMeetingsSince, type Meeting } from "./pocket";
 import { getAssignments } from "./assignments";
+import { getSendEnabled } from "./sendEnabled";
 
 function buildEmailBody(meetings: Meeting[]): string {
   return meetings
@@ -30,9 +31,10 @@ export async function sendAssignedDigests(): Promise<SendResult> {
   since.setDate(since.getDate() - 1);
   since.setHours(0, 0, 0, 0);
 
-  const [meetings, assignments] = await Promise.all([
+  const [meetings, assignments, sendEnabled] = await Promise.all([
     getMeetingsSince(since.toISOString()),
     getAssignments(),
+    getSendEnabled(),
   ]);
 
   const grouped = new Map<string, Meeting[]>();
@@ -56,6 +58,11 @@ export async function sendAssignedDigests(): Promise<SendResult> {
   const skipped: string[] = [];
 
   for (const [contextKey, group] of grouped) {
+    if (sendEnabled[contextKey] === false) {
+      skipped.push(contextKey);
+      continue;
+    }
+
     const recipients = assignments[contextKey] ?? [];
     if (recipients.length === 0) {
       skipped.push(contextKey);

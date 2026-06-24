@@ -107,6 +107,30 @@ body {
   white-space: nowrap;
 }
 
+.panel-checkbox {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  accent-color: #4f6df5;
+  cursor: pointer;
+}
+
+.select-all-panels {
+  border: 1px dashed #c7cbd4;
+  background: transparent;
+  color: #6b7280;
+  font-size: 13px;
+  padding: 7px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.select-all-panels:hover {
+  border-color: #9097a3;
+  color: #1a1d27;
+}
+
 .chevron {
   width: 20px;
   height: 20px;

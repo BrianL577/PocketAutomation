@@ -35,18 +35,22 @@ function MeetingPanel({
   meeting,
   allRecipients,
   assigned,
+  includedInSend,
   onToggleRecipient,
   onSelectAll,
   onAddEmail,
   onDeleteEmail,
+  onToggleIncluded,
 }: {
   meeting: Meeting;
   allRecipients: string[];
   assigned: string[];
+  includedInSend: boolean;
   onToggleRecipient: (contextKey: string, email: string) => void;
   onSelectAll: (contextKey: string) => void;
   onAddEmail: (contextKey: string, email: string) => void;
   onDeleteEmail: (email: string) => void;
+  onToggleIncluded: (contextKey: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -63,6 +67,13 @@ function MeetingPanel({
   return (
     <div className="panel">
       <div className="panel-header" onClick={() => setOpen((o) => !o)}>
+        <input
+          type="checkbox"
+          className="panel-checkbox"
+          checked={includedInSend}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => onToggleIncluded(meeting.contextKey)}
+        />
         <Chevron open={open} />
         <div className="panel-header-text">
           <div className="panel-title">{meeting.title}</div>
@@ -144,6 +155,7 @@ export default function DashboardPage() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [recipients, setRecipients] = useState<string[]>([]);
   const [assignments, setAssignments] = useState<Record<string, string[]>>({});
+  const [sendEnabled, setSendEnabledState] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -159,12 +171,14 @@ export default function DashboardPage() {
     if (showLoadingScreen) setLoading(true);
     setStatus(null);
     try {
-      const [meetingsRes, recipientsRes, assignmentsRes] = await Promise.all([
+      const [meetingsRes, recipientsRes, assignmentsRes, sendEnabledRes] = await Promise.all([
         fetch("/api/meetings").then((r) => r.json()),
         fetch("/api/recipients").then((r) => r.json()),
         fetch("/api/assignments").then((r) => r.json()),
+        fetch("/api/send-enabled").then((r) => r.json()),
       ]);
-      const firstError = meetingsRes.error || recipientsRes.error || assignmentsRes.error;
+      const firstError =
+        meetingsRes.error || recipientsRes.error || assignmentsRes.error || sendEnabledRes.error;
       if (firstError) {
         setStatus(`Error loading data: ${firstError}`);
         setStatusIsError(true);
@@ -172,6 +186,7 @@ export default function DashboardPage() {
       setMeetings(meetingsRes.meetings ?? []);
       setRecipients(recipientsRes.recipients ?? []);
       setAssignments(assignmentsRes.assignments ?? {});
+      setSendEnabledState(sendEnabledRes.sendEnabled ?? {});
     } catch (err: any) {
       setStatus(`Error loading data: ${err.message}`);
       setStatusIsError(true);
@@ -234,6 +249,25 @@ export default function DashboardPage() {
     });
   }
 
+  async function persistSendEnabled(contextKey: string, enabled: boolean) {
+    setSendEnabledState((prev) => ({ ...prev, [contextKey]: enabled }));
+    await fetch("/api/send-enabled", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contextKey, enabled }),
+    });
+  }
+
+  function toggleIncluded(contextKey: string) {
+    const current = sendEnabled[contextKey] ?? true;
+    persistSendEnabled(contextKey, !current);
+  }
+
+  function toggleSelectAllPanels() {
+    const allIncluded = uniqueContextKeys.every((key) => (sendEnabled[key] ?? true));
+    uniqueContextKeys.forEach((key) => persistSendEnabled(key, !allIncluded));
+  }
+
   async function handleSend() {
     setSending(true);
     setStatus(null);
@@ -261,7 +295,11 @@ export default function DashboardPage() {
 
   if (loading) return <div className="loading-screen">Loading...</div>;
 
-  const hasAnyAssignment = Object.values(assignments).some((v) => v.length > 0);
+  const uniqueContextKeys = Array.from(new Set(meetings.map((m) => m.contextKey)));
+  const sendableContextKeys = uniqueContextKeys.filter(
+    (key) => (sendEnabled[key] ?? true) && (assignments[key] ?? []).length > 0
+  );
+  const allPanelsIncluded = uniqueContextKeys.every((key) => sendEnabled[key] ?? true);
 
   return (
     <div className="page">
@@ -278,15 +316,22 @@ export default function DashboardPage() {
           meeting={m}
           allRecipients={recipients}
           assigned={assignments[m.contextKey] ?? []}
+          includedInSend={sendEnabled[m.contextKey] ?? true}
           onToggleRecipient={toggleRecipient}
           onSelectAll={selectAll}
           onAddEmail={addEmail}
           onDeleteEmail={deleteEmail}
+          onToggleIncluded={toggleIncluded}
         />
       ))}
 
       <div className="footer-bar">
-        <button className="send-button" onClick={handleSend} disabled={sending || !hasAnyAssignment}>
+        {uniqueContextKeys.length > 1 && (
+          <button className="select-all-panels" onClick={toggleSelectAllPanels}>
+            {allPanelsIncluded ? "Deselect all panels" : "Select all panels"}
+          </button>
+        )}
+        <button className="send-button" onClick={handleSend} disabled={sending || sendableContextKeys.length === 0}>
           {sending ? "Sending..." : "Send Now"}
         </button>
         {status && <div className={`status-message ${statusIsError ? "error" : ""}`}>{status}</div>}
