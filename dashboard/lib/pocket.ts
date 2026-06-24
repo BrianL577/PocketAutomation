@@ -1,3 +1,5 @@
+import { getAssignments } from "./assignments";
+
 const POCKET_BASE_URL = "https://public.heypocketai.com/api/v1";
 
 export interface ActionItem {
@@ -20,8 +22,20 @@ export interface Meeting {
 /** Groups recurring meeting series (e.g. "AUS-BIOGAS | Call w/ Heart Energy")
  * under a stable key so recipient assignments persist day to day, even
  * though each recording gets a new id and a slightly different title.
+ *
+ * Matching is keyword-based rather than strict-prefix: if a title contains
+ * (anywhere, case-insensitively) a key we've already used for a previous
+ * meeting, it's folded into that same series. The longest matching known
+ * key wins, since e.g. "Condor" could be a substring of a longer key.
+ * Falls back to the text before the first "|" (or the full title) when no
+ * known key matches, which seeds the very first meeting of a new series.
  */
-export function contextKeyFor(title: string): string {
+export function contextKeyFor(title: string, knownKeys: string[] = []): string {
+  const lowerTitle = title.toLowerCase();
+  const matches = knownKeys.filter((key) => key && lowerTitle.includes(key.toLowerCase()));
+  if (matches.length > 0) {
+    return matches.sort((a, b) => b.length - a.length)[0];
+  }
   const [head] = title.split("|");
   return head.trim();
 }
@@ -86,9 +100,11 @@ export async function getMeetingsSince(sinceISO: string): Promise<Meeting[]> {
     return true;
   });
 
-  const details = await Promise.all(
-    candidates.map((rec) => getRecordingDetail(rec.id).catch(() => null))
-  );
+  const [details, assignments] = await Promise.all([
+    Promise.all(candidates.map((rec) => getRecordingDetail(rec.id).catch(() => null))),
+    getAssignments(),
+  ]);
+  const knownKeys = Object.keys(assignments);
 
   const meetings: Meeting[] = [];
   for (let i = 0; i < candidates.length; i++) {
@@ -100,10 +116,13 @@ export async function getMeetingsSince(sinceISO: string): Promise<Meeting[]> {
     const { summary, actionItems } = extractSummaryAndActionItems(detail);
     if (!summary) continue;
 
+    const contextKey = contextKeyFor(rec.title, knownKeys);
+    if (!knownKeys.includes(contextKey)) knownKeys.push(contextKey);
+
     meetings.push({
       id: rec.id,
       title: rec.title,
-      contextKey: contextKeyFor(rec.title),
+      contextKey,
       createdAt: rec.created_at,
       summaryMarkdown: summary,
       actionItems,
