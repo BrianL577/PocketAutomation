@@ -1,15 +1,13 @@
 """
 Diagnostic script - run this manually first.
 
-Pulls yesterday's recordings from Pocket and prints the full raw JSON
-for each one, so we can see the actual field names for attendees/
-participants and action items before building the real automation.
+Prints only the field names/types/shape of the Pocket API responses
+(truncating long text values) so we can see what data is available
+without dumping full transcripts.
 
 Run: python inspect_recordings.py
 """
-import json
 import os
-from datetime import datetime, timedelta, timezone
 
 import requests
 from dotenv import load_dotenv
@@ -19,8 +17,35 @@ load_dotenv()
 POCKET_API_KEY = os.environ["POCKET_API_KEY"]
 POCKET_BASE_URL = "https://public.heypocketai.com/api/v1"
 
+MAX_STR_LEN = 80
 
-def get_recent_recordings(limit=20):
+
+def describe(value, indent=0):
+    pad = "  " * indent
+    if isinstance(value, dict):
+        for key, v in value.items():
+            if isinstance(v, (dict, list)):
+                print(f"{pad}{key}:")
+                describe(v, indent + 1)
+            else:
+                print(f"{pad}{key}: {summarize_scalar(v)}")
+    elif isinstance(value, list):
+        print(f"{pad}[list with {len(value)} item(s)]")
+        if value:
+            describe(value[0], indent + 1)
+    else:
+        print(f"{pad}{summarize_scalar(value)}")
+
+
+def summarize_scalar(v):
+    type_name = type(v).__name__
+    if isinstance(v, str):
+        preview = v if len(v) <= MAX_STR_LEN else v[:MAX_STR_LEN] + "...(truncated)"
+        return f"({type_name}, len={len(v)}) {preview!r}"
+    return f"({type_name}) {v!r}"
+
+
+def get_recent_recordings(limit=5):
     resp = requests.get(
         f"{POCKET_BASE_URL}/public/recordings",
         headers={"Authorization": f"Bearer {POCKET_API_KEY}"},
@@ -40,21 +65,16 @@ def get_recording_detail(recording_id):
 
 
 def main():
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
-
     recordings = get_recent_recordings()
-    print(f"Fetched {len(recordings)} recent recordings (list view):\n")
-    print(json.dumps(recordings, indent=2))
+    print(f"Fetched {len(recordings)} recent recordings (list view).\n")
+    print("=== Shape of ONE list-view recording ===")
+    if recordings:
+        describe(recordings[0])
 
-    print("\n" + "=" * 80)
-    print("Full detail for each recording from yesterday (or all, if date field unclear):")
-    print("=" * 80)
-
-    for rec in recordings:
-        created_at = rec.get("created_at") or rec.get("createdAt") or rec.get("date")
-        print(f"\n--- Recording {rec.get('id')} | created_at field value: {created_at!r} ---")
-        detail = get_recording_detail(rec["id"])
-        print(json.dumps(detail, indent=2))
+    print("\n=== Shape of ONE full recording detail ===")
+    if recordings:
+        detail = get_recording_detail(recordings[0]["id"])
+        describe(detail)
 
 
 if __name__ == "__main__":
