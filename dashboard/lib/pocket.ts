@@ -11,9 +11,19 @@ export interface ActionItem {
 export interface Meeting {
   id: string;
   title: string;
+  contextKey: string;
   createdAt: string;
   summaryMarkdown: string;
   actionItems: ActionItem[];
+}
+
+/** Groups recurring meeting series (e.g. "AUS-BIOGAS | Call w/ Heart Energy")
+ * under a stable key so recipient assignments persist day to day, even
+ * though each recording gets a new id and a slightly different title.
+ */
+export function contextKeyFor(title: string): string {
+  const [head] = title.split("|");
+  return head.trim();
 }
 
 function pocketHeaders() {
@@ -93,6 +103,7 @@ export async function getMeetingsSince(sinceISO: string): Promise<Meeting[]> {
     meetings.push({
       id: rec.id,
       title: rec.title,
+      contextKey: contextKeyFor(rec.title),
       createdAt: rec.created_at,
       summaryMarkdown: summary,
       actionItems,

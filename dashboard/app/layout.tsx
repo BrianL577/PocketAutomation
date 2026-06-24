@@ -1,3 +1,5 @@
+import "./globals.css";
+
 export const metadata = {
   title: "Pocket Meeting Dashboard",
 };
@@ -5,9 +7,7 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body style={{ fontFamily: "system-ui, sans-serif", margin: 0, background: "#f5f5f5" }}>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

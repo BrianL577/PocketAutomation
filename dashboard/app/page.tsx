@@ -11,20 +11,130 @@ interface ActionItem {
 interface Meeting {
   id: string;
   title: string;
+  contextKey: string;
   createdAt: string;
   summaryMarkdown: string;
   actionItems: ActionItem[];
 }
 
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`chevron ${open ? "open" : ""}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function MeetingPanel({
+  meeting,
+  allRecipients,
+  assigned,
+  onToggleRecipient,
+  onSelectAll,
+  onAddEmail,
+}: {
+  meeting: Meeting;
+  allRecipients: string[];
+  assigned: string[];
+  onToggleRecipient: (contextKey: string, email: string) => void;
+  onSelectAll: (contextKey: string) => void;
+  onAddEmail: (contextKey: string, email: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+
+  function submitNewEmail() {
+    if (newEmail.includes("@")) {
+      onAddEmail(meeting.contextKey, newEmail.trim());
+      setNewEmail("");
+    }
+    setAdding(false);
+  }
+
+  return (
+    <div className="panel">
+      <div className="panel-header" onClick={() => setOpen((o) => !o)}>
+        <Chevron open={open} />
+        <div className="panel-header-text">
+          <div className="panel-title">{meeting.title}</div>
+          <div className="panel-meta">{new Date(meeting.createdAt).toLocaleString()}</div>
+        </div>
+        {assigned.length > 0 && (
+          <span className="recipient-count">
+            {assigned.length} recipient{assigned.length > 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+
+      {open && (
+        <div className="panel-body">
+          <div className="summary-text">{meeting.summaryMarkdown}</div>
+          {meeting.actionItems.length > 0 && (
+            <ul className="action-items">
+              {meeting.actionItems.map((a, i) => (
+                <li key={i}>
+                  {a.label} {a.dueDate ? `(due ${a.dueDate})` : ""}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="recipients-label">Send to</div>
+          <div className="chip-row">
+            {allRecipients.length > 2 && (
+              <button
+                className="chip select-all"
+                onClick={() => onSelectAll(meeting.contextKey)}
+              >
+                {assigned.length === allRecipients.length ? "Deselect all" : "Select all"}
+              </button>
+            )}
+            {allRecipients.map((email) => (
+              <button
+                key={email}
+                className={`chip ${assigned.includes(email) ? "selected" : ""}`}
+                onClick={() => onToggleRecipient(meeting.contextKey, email)}
+              >
+                {email}
+              </button>
+            ))}
+            {adding ? (
+              <input
+                autoFocus
+                className="chip-add-input"
+                placeholder="name@example.com"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submitNewEmail()}
+                onBlur={submitNewEmail}
+              />
+            ) : (
+              <button className="chip add-new" onClick={() => setAdding(true)}>
+                + New email
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [recipients, setRecipients] = useState<string[]>([]);
-  const [selectedMeetingIds, setSelectedMeetingIds] = useState<Set<string>>(new Set());
-  const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set());
-  const [newEmail, setNewEmail] = useState("");
+  const [assignments, setAssignments] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [statusIsError, setStatusIsError] = useState(false);
 
   useEffect(() => {
     refreshAll();
@@ -34,172 +144,120 @@ export default function DashboardPage() {
     setLoading(true);
     setStatus(null);
     try {
-      const [meetingsRes, recipientsRes] = await Promise.all([
+      const [meetingsRes, recipientsRes, assignmentsRes] = await Promise.all([
         fetch("/api/meetings").then((r) => r.json()),
         fetch("/api/recipients").then((r) => r.json()),
+        fetch("/api/assignments").then((r) => r.json()),
       ]);
-      if (meetingsRes.error || recipientsRes.error) {
-        setStatus(`Error loading data: ${meetingsRes.error || recipientsRes.error}`);
+      const firstError = meetingsRes.error || recipientsRes.error || assignmentsRes.error;
+      if (firstError) {
+        setStatus(`Error loading data: ${firstError}`);
+        setStatusIsError(true);
       }
       setMeetings(meetingsRes.meetings ?? []);
       setRecipients(recipientsRes.recipients ?? []);
+      setAssignments(assignmentsRes.assignments ?? {});
     } catch (err: any) {
       setStatus(`Error loading data: ${err.message}`);
+      setStatusIsError(true);
     } finally {
       setLoading(false);
     }
   }
 
-  function toggleMeeting(id: string) {
-    setSelectedMeetingIds((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }
-
-  function toggleRecipient(email: string) {
-    setSelectedRecipients((prev) => {
-      const next = new Set(prev);
-      next.has(email) ? next.delete(email) : next.add(email);
-      return next;
-    });
-  }
-
-  function toggleSelectAllRecipients() {
-    setSelectedRecipients((prev) =>
-      prev.size === recipients.length ? new Set() : new Set(recipients)
-    );
-  }
-
-  async function handleAddEmail() {
-    if (!newEmail.includes("@")) return;
-    const res = await fetch("/api/recipients", {
+  async function persistAssignment(contextKey: string, emails: string[]) {
+    setAssignments((prev) => ({ ...prev, [contextKey]: emails }));
+    await fetch("/api/assignments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: newEmail }),
+      body: JSON.stringify({ contextKey, emails }),
     });
-    const data = await res.json();
-    setRecipients(data.recipients ?? []);
-    setNewEmail("");
   }
 
-  async function handleDeleteEmail(email: string) {
+  function toggleRecipient(contextKey: string, email: string) {
+    const current = assignments[contextKey] ?? [];
+    const next = current.includes(email) ? current.filter((e) => e !== email) : [...current, email];
+    persistAssignment(contextKey, next);
+  }
+
+  function selectAll(contextKey: string) {
+    const current = assignments[contextKey] ?? [];
+    const next = current.length === recipients.length ? [] : recipients;
+    persistAssignment(contextKey, next);
+  }
+
+  async function addEmail(contextKey: string, email: string) {
     const res = await fetch("/api/recipients", {
-      method: "DELETE",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
     });
     const data = await res.json();
-    setRecipients(data.recipients ?? []);
-    setSelectedRecipients((prev) => {
-      const next = new Set(prev);
-      next.delete(email);
-      return next;
-    });
+    const updatedRecipients: string[] = data.recipients ?? [];
+    setRecipients(updatedRecipients);
+
+    const current = assignments[contextKey] ?? [];
+    if (!current.includes(email)) {
+      persistAssignment(contextKey, [...current, email]);
+    }
   }
 
   async function handleSend() {
     setSending(true);
     setStatus(null);
-    const meetingsToSend = meetings.filter((m) => selectedMeetingIds.has(m.id));
-    const res = await fetch("/api/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        meetings: meetingsToSend,
-        recipients: Array.from(selectedRecipients),
-      }),
-    });
-    const data = await res.json();
-    setSending(false);
-    setStatus(data.ok ? "Sent!" : `Error: ${data.error}`);
+    setStatusIsError(false);
+    try {
+      const res = await fetch("/api/send", { method: "POST" });
+      const data = await res.json();
+      if (data.error) {
+        setStatus(`Error: ${data.error}`);
+        setStatusIsError(true);
+      } else {
+        setStatus(
+          data.sent.length > 0
+            ? `Sent ${data.sent.length} digest${data.sent.length > 1 ? "s" : ""}.`
+            : "Nothing to send — no meeting has assigned recipients yet."
+        );
+      }
+    } catch (err: any) {
+      setStatus(`Error: ${err.message}`);
+      setStatusIsError(true);
+    } finally {
+      setSending(false);
+    }
   }
 
-  if (loading) return <main style={{ padding: 24 }}>Loading...</main>;
+  if (loading) return <div className="loading-screen">Loading...</div>;
+
+  const hasAnyAssignment = Object.values(assignments).some((v) => v.length > 0);
 
   return (
-    <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      <h1>Pocket Meeting Dashboard</h1>
+    <div className="page">
+      <div className="header">
+        <h1>Pocket Meeting Dashboard</h1>
+        <p>Review yesterday&rsquo;s meetings, assign who should hear about each one, and send.</p>
+      </div>
 
-      <section style={{ marginBottom: 32 }}>
-        <h2>Meetings (since yesterday)</h2>
-        {meetings.length === 0 && <p>No meetings found.</p>}
-        {meetings.map((m) => (
-          <label
-            key={m.id}
-            style={{
-              display: "block",
-              background: "white",
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              padding: 16,
-              marginBottom: 12,
-              cursor: "pointer",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={selectedMeetingIds.has(m.id)}
-              onChange={() => toggleMeeting(m.id)}
-              style={{ marginRight: 8 }}
-            />
-            <strong>{m.title}</strong>
-            <div style={{ fontSize: 12, color: "#666" }}>
-              {new Date(m.createdAt).toLocaleString()}
-            </div>
-            <p style={{ whiteSpace: "pre-wrap", fontSize: 14 }}>{m.summaryMarkdown}</p>
-            {m.actionItems.length > 0 && (
-              <ul style={{ fontSize: 14 }}>
-                {m.actionItems.map((a, i) => (
-                  <li key={i}>
-                    {a.label} {a.dueDate ? `(due ${a.dueDate})` : ""}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </label>
-        ))}
-      </section>
+      <div className="section-title">Meetings</div>
+      {meetings.length === 0 && <div className="empty">No meetings found since yesterday.</div>}
+      {meetings.map((m) => (
+        <MeetingPanel
+          key={m.id}
+          meeting={m}
+          allRecipients={recipients}
+          assigned={assignments[m.contextKey] ?? []}
+          onToggleRecipient={toggleRecipient}
+          onSelectAll={selectAll}
+          onAddEmail={addEmail}
+        />
+      ))}
 
-      <section style={{ marginBottom: 32 }}>
-        <h2>Recipients</h2>
-        <div style={{ marginBottom: 8 }}>
-          <button onClick={toggleSelectAllRecipients}>
-            {selectedRecipients.size === recipients.length ? "Deselect All" : "Select All"}
-          </button>
-        </div>
-        {recipients.map((email) => (
-          <div key={email} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={selectedRecipients.has(email)}
-              onChange={() => toggleRecipient(email)}
-            />
-            <span style={{ flex: 1 }}>{email}</span>
-            <button onClick={() => handleDeleteEmail(email)}>Delete</button>
-          </div>
-        ))}
-        <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-          <input
-            type="email"
-            placeholder="new.email@example.com"
-            value={newEmail}
-            onChange={(e) => setNewEmail(e.target.value)}
-            style={{ flex: 1, padding: 6 }}
-          />
-          <button onClick={handleAddEmail}>Add</button>
-        </div>
-      </section>
-
-      <button
-        onClick={handleSend}
-        disabled={sending || selectedMeetingIds.size === 0 || selectedRecipients.size === 0}
-        style={{ padding: "10px 20px", fontSize: 16 }}
-      >
-        {sending ? "Sending..." : "Send Selected Summaries"}
-      </button>
-      {status && <p>{status}</p>}
-    </main>
+      <div className="footer-bar">
+        <button className="send-button" onClick={handleSend} disabled={sending || !hasAnyAssignment}>
+          {sending ? "Sending..." : "Send Now"}
+        </button>
+        {status && <div className={`status-message ${statusIsError ? "error" : ""}`}>{status}</div>}
+      </div>
+    </div>
   );
 }
