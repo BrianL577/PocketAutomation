@@ -76,9 +76,15 @@ export async function getMeetingsSince(sinceISO: string): Promise<Meeting[]> {
     return true;
   });
 
+  const details = await Promise.all(
+    candidates.map((rec) => getRecordingDetail(rec.id).catch(() => null))
+  );
+
   const meetings: Meeting[] = [];
-  for (const rec of candidates) {
-    const detail = await getRecordingDetail(rec.id);
+  for (let i = 0; i < candidates.length; i++) {
+    const rec = candidates[i];
+    const detail = details[i];
+    if (!detail) continue;
     if (detail.state !== "completed" && !detail.summarizations) continue;
 
     const { summary, actionItems } = extractSummaryAndActionItems(detail);
