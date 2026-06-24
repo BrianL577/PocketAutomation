@@ -65,16 +65,24 @@ def get_recording_detail(recording_id):
 
 
 def main():
-    recordings = get_recent_recordings()
-    print(f"Fetched {len(recordings)} recent recordings (list view).\n")
-    print("=== Shape of ONE list-view recording ===")
+    recordings = get_recent_recordings(limit=30)
+    print(f"Fetched {len(recordings)} recent recordings.\n")
+
+    print("=== id | title | created_at for each recording ===")
+    for rec in recordings:
+        print(f"{rec.get('id')} | {rec.get('title')!r} | {rec.get('created_at')}")
+
+    non_digest = [r for r in recordings if not str(r.get("id", "")).startswith("daily-highlights")]
+    print(f"\n{len(non_digest)} of {len(recordings)} are NOT daily-highlights digests.")
+
+    print("\n=== Shape of ONE list-view recording ===")
     if recordings:
         describe(recordings[0])
 
-    print("\n=== Shape of ONE full recording detail ===")
-    if recordings:
-        detail = get_recording_detail(recordings[0]["id"])
-        describe(detail)
+    target = non_digest[0] if non_digest else recordings[0]
+    print(f"\n=== Shape of ONE full recording detail (id={target['id']}) ===")
+    detail = get_recording_detail(target["id"])
+    describe(detail)
 
 
 if __name__ == "__main__":
