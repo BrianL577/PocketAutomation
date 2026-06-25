@@ -7,11 +7,11 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { contextKey, emails } = await req.json();
-  if (!contextKey || !Array.isArray(emails)) {
+  const { meetingId, emails } = await req.json();
+  if (!meetingId || !Array.isArray(emails)) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
-  await setAssignment(contextKey, emails);
+  await setAssignment(meetingId, emails);
   const assignments = await getAssignments();
   return NextResponse.json({ assignments });
 }

@@ -1,20 +1,17 @@
 import nodemailer from "nodemailer";
 import { getMeetingsSince, type Meeting } from "./pocket";
 import { getAssignments } from "./assignments";
-import { getSendEnabled } from "./sendEnabled";
+import { getSendEnabled, setSendEnabled } from "./sendEnabled";
+import { getTagRecipients, recipientsForTags } from "./tagRecipients";
 
-function buildEmailBody(meetings: Meeting[]): string {
-  return meetings
-    .map((m) => {
-      const actionItemsText = m.actionItems.length
-        ? m.actionItems
-            .map((a) => `- [${a.priority ?? "n/a"}] ${a.label}${a.dueDate ? ` (due ${a.dueDate})` : ""}`)
-            .join("\n")
-        : "None";
+function buildEmailBody(m: Meeting): string {
+  const actionItemsText = m.actionItems.length
+    ? m.actionItems
+        .map((a) => `- [${a.priority ?? "n/a"}] ${a.label}${a.dueDate ? ` (due ${a.dueDate})` : ""}`)
+        .join("\n")
+    : "None";
 
-      return `## ${m.title}\n\n${m.summaryMarkdown}\n\n### Action Items\n${actionItemsText}`;
-    })
-    .join("\n\n---\n\n");
+  return `## ${m.title}\n\n${m.summaryMarkdown}\n\n### Action Items\n${actionItemsText}`;
 }
 
 export interface SendResult {
@@ -22,26 +19,24 @@ export interface SendResult {
   skipped: string[];
 }
 
-/** Sends one digest email per meeting series (context key) to whichever
- * recipients are currently assigned to that series. Series with no
- * assigned recipients are skipped, not sent to nobody.
+/** Sends one digest email per recording to whichever recipients are
+ * currently assigned (manual override, falling back to tag-based routing).
+ * Recordings with no recipients, or explicitly toggled off, are skipped.
+ * Anything successfully sent gets its "included" toggle flipped off
+ * afterward, so the next send (manual or the 5am cron) doesn't re-send the
+ * same recording unless a person manually re-checks it.
  */
 export async function sendAssignedDigests(): Promise<SendResult> {
   const since = new Date();
-  since.setDate(since.getDate() - 1);
+  since.setDate(since.getDate() - 7);
   since.setHours(0, 0, 0, 0);
 
-  const [meetings, assignments, sendEnabled] = await Promise.all([
+  const [meetings, assignments, sendEnabled, tagRecipients] = await Promise.all([
     getMeetingsSince(since.toISOString()),
     getAssignments(),
     getSendEnabled(),
+    getTagRecipients(),
   ]);
-
-  const grouped = new Map<string, Meeting[]>();
-  for (const m of meetings) {
-    if (!grouped.has(m.contextKey)) grouped.set(m.contextKey, []);
-    grouped.get(m.contextKey)!.push(m);
-  }
 
   const gmailAddress = process.env.GMAIL_ADDRESS;
   const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
@@ -57,29 +52,28 @@ export async function sendAssignedDigests(): Promise<SendResult> {
   const sent: string[] = [];
   const skipped: string[] = [];
 
-  for (const [contextKey, group] of grouped) {
-    if (sendEnabled[contextKey] === false) {
-      skipped.push(contextKey);
+  for (const meeting of meetings) {
+    if (sendEnabled[meeting.id] === false) {
+      skipped.push(meeting.id);
       continue;
     }
 
-    const recipients = assignments[contextKey] ?? [];
+    const recipients = assignments[meeting.id] ?? recipientsForTags(meeting.tags, tagRecipients);
     if (recipients.length === 0) {
-      skipped.push(contextKey);
+      skipped.push(meeting.id);
       continue;
     }
-
-    const subject =
-      group.length === 1 ? `Meeting Summary: ${group[0].title}` : `Meeting Summaries: ${contextKey}`;
 
     await transporter.sendMail({
       from: gmailAddress,
       to: recipients.join(", "),
-      subject,
-      text: buildEmailBody(group),
+      subject: `Meeting Summary: ${meeting.title}`,
+      text: buildEmailBody(meeting),
     });
-    sent.push(contextKey);
+    sent.push(meeting.id);
   }
+
+  await Promise.all(sent.map((id) => setSendEnabled(id, false)));
 
   return { sent, skipped };
 }

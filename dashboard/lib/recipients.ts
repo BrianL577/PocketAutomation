@@ -1,5 +1,6 @@
 import { kv } from "@vercel/kv";
 import { getAssignments, setAssignment } from "./assignments";
+import { getTagRecipients, setTagRecipients } from "./tagRecipients";
 
 const KEY = "recipients";
 
@@ -16,10 +17,13 @@ export async function removeRecipient(email: string): Promise<void> {
   const normalized = email.trim().toLowerCase();
   await kv.srem(KEY, normalized);
 
-  const assignments = await getAssignments();
-  await Promise.all(
-    Object.entries(assignments)
+  const [assignments, tagRecipients] = await Promise.all([getAssignments(), getTagRecipients()]);
+  await Promise.all([
+    ...Object.entries(assignments)
       .filter(([, emails]) => emails.includes(normalized))
-      .map(([contextKey, emails]) => setAssignment(contextKey, emails.filter((e) => e !== normalized)))
-  );
+      .map(([meetingId, emails]) => setAssignment(meetingId, emails.filter((e) => e !== normalized))),
+    ...Object.entries(tagRecipients)
+      .filter(([, emails]) => emails.includes(normalized))
+      .map(([tag, emails]) => setTagRecipients(tag, emails.filter((e) => e !== normalized))),
+  ]);
 }

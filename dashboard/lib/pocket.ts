@@ -1,5 +1,3 @@
-import { getAssignments } from "./assignments";
-
 const POCKET_BASE_URL = "https://public.heypocketai.com/api/v1";
 
 export interface ActionItem {
@@ -13,31 +11,10 @@ export interface ActionItem {
 export interface Meeting {
   id: string;
   title: string;
-  contextKey: string;
+  tags: string[];
   createdAt: string;
   summaryMarkdown: string;
   actionItems: ActionItem[];
-}
-
-/** Groups recurring meeting series (e.g. "AUS-BIOGAS | Call w/ Heart Energy")
- * under a stable key so recipient assignments persist day to day, even
- * though each recording gets a new id and a slightly different title.
- *
- * Matching is keyword-based rather than strict-prefix: if a title contains
- * (anywhere, case-insensitively) a key we've already used for a previous
- * meeting, it's folded into that same series. The longest matching known
- * key wins, since e.g. "Condor" could be a substring of a longer key.
- * Falls back to the text before the first "|" (or the full title) when no
- * known key matches, which seeds the very first meeting of a new series.
- */
-export function contextKeyFor(title: string, knownKeys: string[] = []): string {
-  const lowerTitle = title.toLowerCase();
-  const matches = knownKeys.filter((key) => key && lowerTitle.includes(key.toLowerCase()));
-  if (matches.length > 0) {
-    return matches.sort((a, b) => b.length - a.length)[0];
-  }
-  const [head] = title.split("|");
-  return head.trim();
 }
 
 function pocketHeaders() {
@@ -46,7 +23,7 @@ function pocketHeaders() {
   return { Authorization: `Bearer ${apiKey}` };
 }
 
-async function listRecordings(limit = 50) {
+async function listRecordings(limit = 100) {
   const url = new URL(`${POCKET_BASE_URL}/public/recordings`);
   url.searchParams.set("limit", String(limit));
   url.searchParams.set("sort", "-created_at");
@@ -54,7 +31,13 @@ async function listRecordings(limit = 50) {
   const resp = await fetch(url, { headers: pocketHeaders() });
   if (!resp.ok) throw new Error(`Pocket list error ${resp.status}`);
   const json = await resp.json();
-  return json.data as Array<{ id: string; title: string; created_at: string; state: string }>;
+  return json.data as Array<{
+    id: string;
+    title: string;
+    created_at: string;
+    state: string;
+    tags?: Array<{ name: string }>;
+  }>;
 }
 
 async function getRecordingDetail(id: string) {
@@ -86,12 +69,13 @@ function extractSummaryAndActionItems(detail: any): { summary: string; actionIte
   return { summary, actionItems };
 }
 
-/** Pulls recordings from the given start of day (inclusive) to now, skipping
+/** Pulls recordings from the given start (inclusive) to now, skipping
  * daily-highlights digests (we want individual meetings) and anything not
- * yet processed.
+ * yet processed. Each recording is its own panel/meeting - there is no
+ * series grouping.
  */
 export async function getMeetingsSince(sinceISO: string): Promise<Meeting[]> {
-  const recordings = await listRecordings(50);
+  const recordings = await listRecordings(100);
   const since = new Date(sinceISO).getTime();
 
   const candidates = recordings.filter((r) => {
@@ -100,11 +84,9 @@ export async function getMeetingsSince(sinceISO: string): Promise<Meeting[]> {
     return true;
   });
 
-  const [details, assignments] = await Promise.all([
-    Promise.all(candidates.map((rec) => getRecordingDetail(rec.id).catch(() => null))),
-    getAssignments(),
-  ]);
-  const knownKeys = Object.keys(assignments);
+  const details = await Promise.all(
+    candidates.map((rec) => getRecordingDetail(rec.id).catch(() => null))
+  );
 
   const meetings: Meeting[] = [];
   for (let i = 0; i < candidates.length; i++) {
@@ -116,13 +98,10 @@ export async function getMeetingsSince(sinceISO: string): Promise<Meeting[]> {
     const { summary, actionItems } = extractSummaryAndActionItems(detail);
     if (!summary) continue;
 
-    const contextKey = contextKeyFor(rec.title, knownKeys);
-    if (!knownKeys.includes(contextKey)) knownKeys.push(contextKey);
-
     meetings.push({
       id: rec.id,
       title: rec.title,
-      contextKey,
+      tags: (rec.tags ?? []).map((t) => t.name),
       createdAt: rec.created_at,
       summaryMarkdown: summary,
       actionItems,
