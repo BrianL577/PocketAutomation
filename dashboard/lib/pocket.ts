@@ -15,6 +15,7 @@ export interface Meeting {
   createdAt: string;
   summaryMarkdown: string;
   actionItems: ActionItem[];
+  isProcessingComplete: boolean;
 }
 
 function pocketHeaders() {
@@ -103,6 +104,7 @@ export async function getMeetingsSince(sinceISO: string): Promise<Meeting[]> {
       createdAt: rec.created_at,
       summaryMarkdown: summary,
       actionItems,
+      isProcessingComplete: !!detail && detail.state === "completed",
     });
   }
 

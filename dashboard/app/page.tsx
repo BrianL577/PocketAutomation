@@ -15,6 +15,7 @@ interface Meeting {
   createdAt: string;
   summaryMarkdown: string;
   actionItems: ActionItem[];
+  isProcessingComplete: boolean;
 }
 
 function Chevron({ open }: { open: boolean }) {
@@ -164,7 +165,9 @@ function MeetingPanel({
       {open && (
         <div className="panel-body">
           <div className="summary-text">
-            {meeting.summaryMarkdown || "Summary still processing..."}
+            {meeting.isProcessingComplete
+              ? meeting.summaryMarkdown
+              : "Summary still processing..."}
           </div>
           {meeting.actionItems.length > 0 && (
             <ul className="action-items">

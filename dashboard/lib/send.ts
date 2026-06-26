@@ -58,7 +58,7 @@ export async function sendAssignedDigests(): Promise<SendResult> {
       continue;
     }
 
-    if (!meeting.summaryMarkdown) {
+    if (!meeting.isProcessingComplete || !meeting.summaryMarkdown) {
       skipped.push(meeting.id);
       continue;
     }
