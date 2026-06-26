@@ -2,8 +2,8 @@ name: Daily digest send
 
 on:
   schedule:
-    # 09:00 UTC ≈ 5:00 AM ET (drifts by an hour across DST changes)
-    - cron: "0 9 * * *"
+    # test: 11:37 PM PDT
+    - cron: "37 6 * * *"
   workflow_dispatch: {}
 
 jobs:
