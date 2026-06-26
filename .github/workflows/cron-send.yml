@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Trigger dashboard cron endpoint
         run: |
-          status=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+          status=$(curl -s -L -o /tmp/response.json -w "%{http_code}" \
             -X GET "${{ secrets.DASHBOARD_URL }}/api/cron/send" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
           echo "HTTP status: $status"
