@@ -92,11 +92,9 @@ export async function getMeetingsSince(sinceISO: string): Promise<Meeting[]> {
   for (let i = 0; i < candidates.length; i++) {
     const rec = candidates[i];
     const detail = details[i];
-    if (!detail) continue;
-    if (detail.state !== "completed" && !detail.summarizations) continue;
-
-    const { summary, actionItems } = extractSummaryAndActionItems(detail);
-    if (!summary) continue;
+    const { summary, actionItems } = detail
+      ? extractSummaryAndActionItems(detail)
+      : { summary: "", actionItems: [] };
 
     meetings.push({
       id: rec.id,

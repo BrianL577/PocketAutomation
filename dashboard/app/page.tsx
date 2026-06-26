@@ -163,7 +163,9 @@ function MeetingPanel({
 
       {open && (
         <div className="panel-body">
-          <div className="summary-text">{meeting.summaryMarkdown}</div>
+          <div className="summary-text">
+            {meeting.summaryMarkdown || "Summary still processing..."}
+          </div>
           {meeting.actionItems.length > 0 && (
             <ul className="action-items">
               {meeting.actionItems.map((a, i) => (

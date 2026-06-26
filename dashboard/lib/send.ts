@@ -58,6 +58,11 @@ export async function sendAssignedDigests(): Promise<SendResult> {
       continue;
     }
 
+    if (!meeting.summaryMarkdown) {
+      skipped.push(meeting.id);
+      continue;
+    }
+
     const recipients = assignments[meeting.id] ?? recipientsForTags(meeting.tags, tagRecipients);
     if (recipients.length === 0) {
       skipped.push(meeting.id);
