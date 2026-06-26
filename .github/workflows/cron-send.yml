@@ -1,0 +1,23 @@
+name: Daily digest send
+
+on:
+  schedule:
+    # 09:00 UTC ≈ 5:00 AM ET (drifts by an hour across DST changes)
+    - cron: "0 9 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger dashboard cron endpoint
+        run: |
+          status=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X GET "${{ secrets.DASHBOARD_URL }}/api/cron/send" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          echo "HTTP status: $status"
+          cat /tmp/response.json
+          if [ "$status" -ge 300 ]; then
+            echo "Send endpoint returned an error status"
+            exit 1
+          fi
