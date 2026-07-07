@@ -4,14 +4,67 @@ import { getAssignments } from "./assignments";
 import { getSendEnabled, setSendEnabled } from "./sendEnabled";
 import { getTagRecipients, recipientsForTags } from "./tagRecipients";
 
-function buildEmailBody(m: Meeting): string {
-  const actionItemsText = m.actionItems.length
-    ? m.actionItems
-        .map((a) => `- [${a.priority ?? "n/a"}] ${a.label}${a.dueDate ? ` (due ${a.dueDate})` : ""}`)
-        .join("\n")
-    : "None";
+function markdownToHtml(md: string): string {
+  return md
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/^#### (.+)$/gm, "<h4>$1</h4>")
+    .replace(/^### (.+)$/gm, "<h3>$1</h3>")
+    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
+    .replace(/^# (.+)$/gm, "<h1>$1</h1>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/^[-*] (.+)$/gm, "<li>$1</li>")
+    .replace(/\n{2,}/g, "</p><p>")
+    .trim();
+}
 
-  return `## ${m.title}\n\n${m.summaryMarkdown}\n\n### Action Items\n${actionItemsText}`;
+function buildEmailHtml(m: Meeting): string {
+  const actionItemsHtml = m.actionItems.length
+    ? "<ul>" +
+      m.actionItems
+        .map((a) => {
+          const priority = a.priority ? `<strong>[${a.priority}]</strong> ` : "";
+          const due = a.dueDate ? ` <em>(due ${a.dueDate})</em>` : "";
+          return `<li>${priority}${a.label}${due}</li>`;
+        })
+        .join("") +
+      "</ul>"
+    : "<p>None</p>";
+
+  const summaryHtml = markdownToHtml(m.summaryMarkdown);
+  const date = new Date(m.createdAt).toLocaleDateString("en-US", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric",
+  });
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: Arial, sans-serif; font-size: 15px; color: #111; max-width: 680px; margin: 0 auto; padding: 24px; }
+  h1, h2, h3, h4 { color: #1a1a1a; margin-top: 24px; }
+  h2 { font-size: 22px; border-bottom: 2px solid #e0e0e0; padding-bottom: 8px; }
+  h3 { font-size: 17px; }
+  p { line-height: 1.6; }
+  ul { padding-left: 20px; line-height: 1.8; }
+  .meta { color: #666; font-size: 13px; margin-bottom: 20px; }
+  .section-label { font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; color: #555; margin-top: 28px; margin-bottom: 8px; }
+  .divider { border: none; border-top: 1px solid #e0e0e0; margin: 24px 0; }
+</style>
+</head>
+<body>
+  <h2>${m.title}</h2>
+  <div class="meta">${date}</div>
+  <hr class="divider">
+  <div class="section-label">Summary</div>
+  <p>${summaryHtml}</p>
+  <hr class="divider">
+  <div class="section-label">Action Items</div>
+  ${actionItemsHtml}
+</body>
+</html>`;
 }
 
 export interface SendResult {
@@ -73,7 +126,7 @@ export async function sendAssignedDigests(): Promise<SendResult> {
       from: gmailAddress,
       to: recipients.join(", "),
       subject: `Meeting Summary: ${meeting.title}`,
-      text: buildEmailBody(meeting),
+      html: buildEmailHtml(meeting),
     });
     sent.push(meeting.id);
   }
