@@ -42,8 +42,9 @@ function buildEmailHtml(m: Meeting): string {
 <html>
 <head>
 <meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
-  body { font-family: Arial, sans-serif; font-size: 15px; color: #111; max-width: 680px; margin: 0 auto; padding: 24px; }
+  body { font-family: 'Nunito', Arial, sans-serif; font-size: 15px; color: #111; max-width: 680px; margin: 0 auto; padding: 24px; }
   h1, h2, h3, h4 { color: #1a1a1a; margin-top: 24px; }
   h2 { font-size: 22px; border-bottom: 2px solid #e0e0e0; padding-bottom: 8px; }
   h3 { font-size: 17px; }
