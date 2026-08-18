@@ -333,6 +333,74 @@ body {
   letter-spacing: 0.03em;
 }
 
+.panel-disabled {
+  opacity: 0.55;
+  background: #f4f5f7;
+}
+
+.panel-disabled:hover {
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+.panel-disabled .panel-header {
+  cursor: default;
+}
+
+.disabled-badge {
+  display: inline-block;
+  background: #ece9e2;
+  color: #8a6d1f;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.chip.disabled {
+  background: #eceef1;
+  border-color: #e1e3e8;
+  color: #9097a3;
+  cursor: default;
+  pointer-events: none;
+}
+
+.missing-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #b3541e;
+  background: #fdf1e6;
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.workspace-label {
+  margin-top: 18px;
+}
+
+.workspace-input {
+  width: 100%;
+  border: 1px solid #d9dce3;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  outline: none;
+  font-family: inherit;
+}
+
+.workspace-input:focus {
+  border-color: #4f6df5;
+}
+
+.workspace-input.empty {
+  border-color: #e8b98a;
+  background: #fffaf3;
+}
+
 .loading-screen {
   display: flex;
   align-items: center;

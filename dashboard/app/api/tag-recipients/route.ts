@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getTagRecipients, setTagRecipients } from "../../../lib/tagRecipients";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const tagRecipients = await getTagRecipients();
   return NextResponse.json({ tagRecipients });

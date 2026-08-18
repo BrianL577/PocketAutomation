@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getAssignments, setAssignment } from "../../../lib/assignments";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const assignments = await getAssignments();
   return NextResponse.json({ assignments });

@@ -2,7 +2,7 @@ import nodemailer from "nodemailer";
 import { getMeetingsSince, type Meeting } from "./pocket";
 import { getAssignments } from "./assignments";
 import { getSendEnabled, setSendEnabled } from "./sendEnabled";
-import { getTagRecipients, recipientsForTags } from "./tagRecipients";
+import { getWorkspaces } from "./workspaces";
 
 function markdownToHtml(md: string): string {
   return md
@@ -20,7 +20,7 @@ function markdownToHtml(md: string): string {
     .trim();
 }
 
-function buildEmailHtml(m: Meeting): string {
+function buildEmailHtml(m: Meeting, workspace: string): string {
   const actionItemsHtml = m.actionItems.length
     ? "<ul>" +
       m.actionItems
@@ -57,7 +57,7 @@ function buildEmailHtml(m: Meeting): string {
 </head>
 <body>
   <h2>${m.title}</h2>
-  <div class="meta">${date}</div>
+  <div class="meta">${date} &middot; Recap workspace: ${workspace}</div>
   <hr class="divider">
   <div class="section-label">Summary</div>
   <p>${summaryHtml}</p>
@@ -73,10 +73,11 @@ export interface SendResult {
   skipped: string[];
 }
 
-/** Sends one digest email per recording to whichever recipients are
- * currently assigned (manual override, falling back to tag-based routing).
- * Recordings with no recipients, or explicitly toggled off, are skipped.
- * Anything successfully sent gets its "included" toggle flipped off
+/** Sends one digest email per recording to the recipients a person has
+ * manually assigned to it, filed under the Recap workspace they typed in.
+ * Recordings without both an explicit recipient list and a workspace, or
+ * explicitly toggled off, are skipped - there is no automatic tag-based
+ * routing. Anything successfully sent gets its "included" toggle flipped off
  * afterward, so the next send (manual or the 5am cron) doesn't re-send the
  * same recording unless a person manually re-checks it.
  */
@@ -85,11 +86,11 @@ export async function sendAssignedDigests(): Promise<SendResult> {
   since.setDate(since.getDate() - 7);
   since.setHours(0, 0, 0, 0);
 
-  const [meetings, assignments, sendEnabled, tagRecipients] = await Promise.all([
+  const [meetings, assignments, sendEnabled, workspaces] = await Promise.all([
     getMeetingsSince(since.toISOString()),
     getAssignments(),
     getSendEnabled(),
-    getTagRecipients(),
+    getWorkspaces(),
   ]);
 
   const gmailAddress = process.env.GMAIL_ADDRESS;
@@ -117,8 +118,9 @@ export async function sendAssignedDigests(): Promise<SendResult> {
       continue;
     }
 
-    const recipients = assignments[meeting.id] ?? recipientsForTags(meeting.tags, tagRecipients);
-    if (recipients.length === 0) {
+    const recipients = assignments[meeting.id] ?? [];
+    const workspace = (workspaces[meeting.id] ?? "").trim();
+    if (recipients.length === 0 || !workspace) {
       skipped.push(meeting.id);
       continue;
     }
@@ -127,7 +129,7 @@ export async function sendAssignedDigests(): Promise<SendResult> {
       from: gmailAddress,
       to: recipients.join(", "),
       subject: `Meeting Summary: ${meeting.title}`,
-      html: buildEmailHtml(meeting),
+      html: buildEmailHtml(meeting, workspace),
     });
     sent.push(meeting.id);
   }
