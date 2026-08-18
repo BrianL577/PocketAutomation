@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { listRecapWorkspaces, RecapNotConfiguredError } from "../../../../lib/recap";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 export async function GET() {
   try {

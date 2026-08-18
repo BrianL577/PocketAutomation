@@ -18,15 +18,16 @@ function recapConfig() {
 }
 
 /** Every workspace the configured personal API key currently has upload
- * (canAddEntry) access to. Access is checked live by Recap on each call, so
- * this always reflects the key owner's current membership - nothing is
- * cached here.
+ * (canAddEntry) access to. Recap checks access live on each call, so a
+ * short revalidate window (rather than no-store) is enough to stay current
+ * with membership changes while keeping the dashboard's 2-minute poll from
+ * running into Recap's per-key rate limit (30-60 req/min).
  */
 export async function listRecapWorkspaces(): Promise<RecapWorkspace[]> {
   const { baseUrl, apiKey } = recapConfig();
   const resp = await fetch(`${baseUrl}/api/external/v1/workspaces`, {
     headers: { Authorization: `Bearer ${apiKey}` },
-    cache: "no-store",
+    next: { revalidate: 30 },
   });
   if (!resp.ok) throw new Error(`Recap workspaces error ${resp.status}`);
   const json = await resp.json();

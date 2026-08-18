@@ -24,12 +24,32 @@ function pocketHeaders() {
   return { Authorization: `Bearer ${apiKey}` };
 }
 
+// Pocket's API is rate-limited, and the dashboard polls every 2 minutes
+// (plus whatever manual reloads happen on top of that) - a 30s revalidate
+// window means bursts of near-simultaneous requests share one upstream
+// call instead of each hitting Pocket directly, while still keeping the
+// dashboard well within "real time" for a meeting summary tool.
+const REVALIDATE_SECONDS = 30;
+
+async function pocketFetch(url: string | URL, retryOn429 = true): Promise<Response> {
+  const resp = await fetch(url, {
+    headers: pocketHeaders(),
+    next: { revalidate: REVALIDATE_SECONDS },
+  });
+  if (resp.status === 429 && retryOn429) {
+    const retryAfter = Number(resp.headers.get("retry-after"));
+    await new Promise((r) => setTimeout(r, Number.isFinite(retryAfter) ? retryAfter * 1000 : 1500));
+    return pocketFetch(url, false);
+  }
+  return resp;
+}
+
 async function listRecordings(limit = 100) {
   const url = new URL(`${POCKET_BASE_URL}/public/recordings`);
   url.searchParams.set("limit", String(limit));
   url.searchParams.set("sort", "-created_at");
 
-  const resp = await fetch(url, { headers: pocketHeaders(), cache: "no-store" });
+  const resp = await pocketFetch(url);
   if (!resp.ok) throw new Error(`Pocket list error ${resp.status}`);
   const json = await resp.json();
   return json.data as Array<{
@@ -42,10 +62,7 @@ async function listRecordings(limit = 100) {
 }
 
 async function getRecordingDetail(id: string) {
-  const resp = await fetch(`${POCKET_BASE_URL}/public/recordings/${id}`, {
-    headers: pocketHeaders(),
-    cache: "no-store",
-  });
+  const resp = await pocketFetch(`${POCKET_BASE_URL}/public/recordings/${id}`);
   if (!resp.ok) throw new Error(`Pocket detail error ${resp.status}`);
   const json = await resp.json();
   return json.data;
