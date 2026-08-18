@@ -21,7 +21,7 @@ function markdownToHtml(md: string): string {
     .trim();
 }
 
-function buildEmailHtml(m: Meeting, workspace: string): string {
+function buildEmailHtml(m: Meeting, workspaceNames: string[]): string {
   const actionItemsHtml = m.actionItems.length
     ? "<ul>" +
       m.actionItems
@@ -38,6 +38,9 @@ function buildEmailHtml(m: Meeting, workspace: string): string {
   const date = new Date(m.createdAt).toLocaleDateString("en-US", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
   });
+
+  const workspaceMeta =
+    workspaceNames.length > 0 ? ` &middot; Recap: ${workspaceNames.join(", ")}` : "";
 
   return `<!DOCTYPE html>
 <html>
@@ -58,7 +61,7 @@ function buildEmailHtml(m: Meeting, workspace: string): string {
 </head>
 <body>
   <h2>${m.title}</h2>
-  <div class="meta">${date} &middot; Recap workspace: ${workspace}</div>
+  <div class="meta">${date}${workspaceMeta}</div>
   <hr class="divider">
   <div class="section-label">Summary</div>
   <p>${summaryHtml}</p>
@@ -72,17 +75,19 @@ function buildEmailHtml(m: Meeting, workspace: string): string {
 export interface SendResult {
   sent: string[];
   skipped: string[];
-  recapPushed: string[];
-  recapFailed: { meetingId: string; error: string }[];
+  recapPushed: { meetingId: string; workspaceId: string }[];
+  recapFailed: { meetingId: string; workspaceId: string; error: string }[];
 }
 
 /** Sends one digest email per recording to the recipients a person has
- * manually assigned to it, filed under the Recap workspace they typed in.
- * Recordings without both an explicit recipient list and a workspace, or
- * explicitly toggled off, are skipped - there is no automatic tag-based
- * routing. Anything successfully sent gets its "included" toggle flipped off
- * afterward, so the next send (manual or the 5am cron) doesn't re-send the
- * same recording unless a person manually re-checks it.
+ * manually assigned to it - that's the only requirement to send. Recap
+ * workspaces are optional and independent: a meeting with recipients but no
+ * workspace still emails fine, it just doesn't sync to Recap. A meeting can
+ * also be filed under more than one workspace, each pushed separately.
+ * Explicitly toggled-off recordings are skipped - there is no automatic
+ * tag-based routing. Anything successfully emailed gets its "included"
+ * toggle flipped off afterward, so the next send (manual or the 5am cron)
+ * doesn't re-send the same recording unless a person manually re-checks it.
  */
 export async function sendAssignedDigests(): Promise<SendResult> {
   const since = new Date();
@@ -109,8 +114,8 @@ export async function sendAssignedDigests(): Promise<SendResult> {
 
   const sent: string[] = [];
   const skipped: string[] = [];
-  const recapPushed: string[] = [];
-  const recapFailed: { meetingId: string; error: string }[] = [];
+  const recapPushed: { meetingId: string; workspaceId: string }[] = [];
+  const recapFailed: { meetingId: string; workspaceId: string; error: string }[] = [];
 
   for (const meeting of meetings) {
     if (sendEnabled[meeting.id] === false) {
@@ -124,34 +129,38 @@ export async function sendAssignedDigests(): Promise<SendResult> {
     }
 
     const recipients = assignments[meeting.id] ?? [];
-    const workspace = workspaces[meeting.id];
-    if (recipients.length === 0 || !workspace?.id) {
+    if (recipients.length === 0) {
       skipped.push(meeting.id);
       continue;
     }
+
+    const meetingWorkspaces = workspaces[meeting.id] ?? [];
 
     await transporter.sendMail({
       from: gmailAddress,
       to: recipients.join(", "),
       subject: `Meeting Summary: ${meeting.title}`,
-      html: buildEmailHtml(meeting, workspace.name),
+      html: buildEmailHtml(meeting, meetingWorkspaces.map((w) => w.name)),
     });
     sent.push(meeting.id);
 
     // The email already went out - a Recap hiccup shouldn't be reported as a
     // failed send, just surfaced separately so it can be retried/noticed.
-    try {
-      await pushRecapEntry(workspace.id, {
-        source: "pocket",
-        externalId: meeting.id,
-        text: meeting.summaryMarkdown,
-        title: meeting.title,
-        tagNames: meeting.tags,
-      });
-      recapPushed.push(meeting.id);
-    } catch (err: any) {
-      if (!(err instanceof RecapNotConfiguredError)) {
-        recapFailed.push({ meetingId: meeting.id, error: err.message });
+    // No workspace picked is a normal, non-error case - nothing to push.
+    for (const workspace of meetingWorkspaces) {
+      try {
+        await pushRecapEntry(workspace.id, {
+          source: "pocket",
+          externalId: meeting.id,
+          text: meeting.summaryMarkdown,
+          title: meeting.title,
+          tagNames: meeting.tags,
+        });
+        recapPushed.push({ meetingId: meeting.id, workspaceId: workspace.id });
+      } catch (err: any) {
+        if (!(err instanceof RecapNotConfiguredError)) {
+          recapFailed.push({ meetingId: meeting.id, workspaceId: workspace.id, error: err.message });
+        }
       }
     }
   }

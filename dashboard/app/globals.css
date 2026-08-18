@@ -334,11 +334,12 @@ body {
 }
 
 .panel-disabled {
-  opacity: 0.55;
-  background: #f4f5f7;
+  transition: opacity 0.12s ease, background 0.12s ease;
 }
 
 .panel-disabled:hover {
+  opacity: 0.55;
+  background: #f4f5f7;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
 
@@ -378,29 +379,18 @@ body {
   white-space: nowrap;
 }
 
+.info-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  background: #f0f1f4;
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
 .workspace-label {
   margin-top: 18px;
-}
-
-.workspace-select {
-  width: 100%;
-  border: 1px solid #d9dce3;
-  border-radius: 10px;
-  padding: 9px 12px;
-  font-size: 13.5px;
-  outline: none;
-  font-family: inherit;
-  background: #fff;
-  color: #1a1d27;
-}
-
-.workspace-select:focus {
-  border-color: #4f6df5;
-}
-
-.workspace-select.empty {
-  border-color: #e8b98a;
-  background: #fffaf3;
 }
 
 .workspace-unconfigured {
