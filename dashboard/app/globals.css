@@ -382,7 +382,7 @@ body {
   margin-top: 18px;
 }
 
-.workspace-input {
+.workspace-select {
   width: 100%;
   border: 1px solid #d9dce3;
   border-radius: 10px;
@@ -390,15 +390,27 @@ body {
   font-size: 13.5px;
   outline: none;
   font-family: inherit;
+  background: #fff;
+  color: #1a1d27;
 }
 
-.workspace-input:focus {
+.workspace-select:focus {
   border-color: #4f6df5;
 }
 
-.workspace-input.empty {
+.workspace-select.empty {
   border-color: #e8b98a;
   background: #fffaf3;
+}
+
+.workspace-unconfigured {
+  font-size: 13px;
+  color: #b3541e;
+  background: #fdf1e6;
+  border: 1px dashed #e8b98a;
+  border-radius: 10px;
+  padding: 10px 12px;
+  line-height: 1.5;
 }
 
 .loading-screen {

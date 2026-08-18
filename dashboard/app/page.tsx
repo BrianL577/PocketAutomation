@@ -18,6 +18,16 @@ interface Meeting {
   isProcessingComplete: boolean;
 }
 
+interface RecapWorkspace {
+  id: string;
+  name: string;
+}
+
+interface MeetingWorkspace {
+  id: string;
+  name: string;
+}
+
 function Chevron({ open }: { open: boolean }) {
   return (
     <svg
@@ -110,6 +120,8 @@ function MeetingPanel({
   assigned,
   includedInSend,
   workspace,
+  recapWorkspaces,
+  recapConfigured,
   onToggleRecipient,
   onSelectAll,
   onAddEmail,
@@ -121,20 +133,18 @@ function MeetingPanel({
   allRecipients: string[];
   assigned: string[];
   includedInSend: boolean;
-  workspace: string;
+  workspace: MeetingWorkspace | undefined;
+  recapWorkspaces: RecapWorkspace[];
+  recapConfigured: boolean;
   onToggleRecipient: (meetingId: string, email: string) => void;
   onSelectAll: (meetingId: string) => void;
   onAddEmail: (meetingId: string, email: string) => void;
   onDeleteEmail: (email: string) => void;
   onToggleIncluded: (meetingId: string) => void;
-  onWorkspaceChange: (meetingId: string, workspace: string) => void;
+  onWorkspaceChange: (meetingId: string, workspaceId: string, workspaceName: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [workspaceDraft, setWorkspaceDraft] = useState(workspace);
-
-  useEffect(() => {
-    setWorkspaceDraft(workspace);
-  }, [workspace]);
+  const hasWorkspace = !!workspace?.id;
 
   return (
     <div className="panel">
@@ -169,7 +179,7 @@ function MeetingPanel({
             {assigned.length} recipient{assigned.length > 1 ? "s" : ""}
           </span>
         )}
-        {includedInSend && (assigned.length === 0 || !workspace.trim()) && (
+        {includedInSend && (assigned.length === 0 || !hasWorkspace) && (
           <span className="missing-badge">Needs recipients &amp; workspace</span>
         )}
       </div>
@@ -202,15 +212,29 @@ function MeetingPanel({
           />
 
           <div className="recipients-label workspace-label">Recap workspace (required)</div>
-          <input
-            className={`workspace-input ${!workspaceDraft.trim() ? "empty" : ""}`}
-            placeholder="e.g. Client X / Q3 Planning"
-            value={workspaceDraft}
-            onChange={(e) => setWorkspaceDraft(e.target.value)}
-            onBlur={() => {
-              if (workspaceDraft !== workspace) onWorkspaceChange(meeting.id, workspaceDraft);
-            }}
-          />
+          {recapConfigured ? (
+            <select
+              className={`workspace-select ${!hasWorkspace ? "empty" : ""}`}
+              value={workspace?.id ?? ""}
+              onChange={(e) => {
+                const chosen = recapWorkspaces.find((w) => w.id === e.target.value);
+                if (chosen) onWorkspaceChange(meeting.id, chosen.id, chosen.name);
+              }}
+            >
+              <option value="" disabled>
+                Select a workspace...
+              </option>
+              {recapWorkspaces.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="workspace-unconfigured">
+              Recap isn't connected yet - set RECAP_BASE_URL and RECAP_API_KEY to pick a workspace here.
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -272,7 +296,9 @@ export default function DashboardPage() {
   const [assignments, setAssignments] = useState<Record<string, string[]>>({});
   const [sendEnabled, setSendEnabledState] = useState<Record<string, boolean>>({});
   const [tagRecipients, setTagRecipients] = useState<Record<string, string[]>>({});
-  const [workspaces, setWorkspaces] = useState<Record<string, string>>({});
+  const [workspaces, setWorkspaces] = useState<Record<string, MeetingWorkspace>>({});
+  const [recapWorkspaces, setRecapWorkspaces] = useState<RecapWorkspace[]>([]);
+  const [recapConfigured, setRecapConfigured] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -288,18 +314,26 @@ export default function DashboardPage() {
     if (showLoadingScreen) setLoading(true);
     setStatus(null);
     try {
-      const [meetingsRes, recipientsRes, assignmentsRes, sendEnabledRes, tagRecipientsRes, workspacesRes] =
-        await Promise.all([
-          fetch("/api/meetings", { cache: "no-store" }).then((r) => r.json()),
-          fetch("/api/recipients", { cache: "no-store" }).then((r) => r.json()),
-          fetch("/api/assignments", { cache: "no-store" }).then((r) => r.json()),
-          fetch("/api/send-enabled", { cache: "no-store" }).then((r) => r.json()),
-          fetch("/api/tag-recipients", { cache: "no-store" }).then((r) => r.json()),
-          fetch("/api/workspace", { cache: "no-store" }).then((r) => r.json()),
-        ]);
+      const [
+        meetingsRes,
+        recipientsRes,
+        assignmentsRes,
+        sendEnabledRes,
+        tagRecipientsRes,
+        workspacesRes,
+        recapWorkspacesRes,
+      ] = await Promise.all([
+        fetch("/api/meetings", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/recipients", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/assignments", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/send-enabled", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/tag-recipients", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/workspace", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/recap/workspaces", { cache: "no-store" }).then((r) => r.json()),
+      ]);
       const firstError =
         meetingsRes.error || recipientsRes.error || assignmentsRes.error || sendEnabledRes.error ||
-        tagRecipientsRes.error || workspacesRes.error;
+        tagRecipientsRes.error || workspacesRes.error || recapWorkspacesRes.error;
       if (firstError) {
         setStatus(`Error loading data: ${firstError}`);
         setStatusIsError(true);
@@ -310,6 +344,8 @@ export default function DashboardPage() {
       setSendEnabledState(sendEnabledRes.sendEnabled ?? {});
       setTagRecipients(tagRecipientsRes.tagRecipients ?? {});
       setWorkspaces(workspacesRes.workspaces ?? {});
+      setRecapWorkspaces(recapWorkspacesRes.workspaces ?? []);
+      setRecapConfigured(recapWorkspacesRes.configured !== false);
     } catch (err: any) {
       setStatus(`Error loading data: ${err.message}`);
       setStatusIsError(true);
@@ -345,12 +381,12 @@ export default function DashboardPage() {
     persistAssignment(meetingId, next);
   }
 
-  async function persistWorkspace(meetingId: string, workspace: string) {
-    setWorkspaces((prev) => ({ ...prev, [meetingId]: workspace }));
+  async function persistWorkspace(meetingId: string, workspaceId: string, workspaceName: string) {
+    setWorkspaces((prev) => ({ ...prev, [meetingId]: { id: workspaceId, name: workspaceName } }));
     await fetch("/api/workspace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ meetingId, workspace }),
+      body: JSON.stringify({ meetingId, workspaceId, workspaceName }),
     });
   }
 
@@ -425,11 +461,18 @@ export default function DashboardPage() {
         setStatus(`Error: ${data.error}`);
         setStatusIsError(true);
       } else {
+        const recapNote =
+          data.recapFailed?.length > 0
+            ? ` Recap push failed for ${data.recapFailed.length} meeting${data.recapFailed.length > 1 ? "s" : ""} (email still sent).`
+            : data.recapPushed?.length > 0
+              ? ` Pushed ${data.recapPushed.length} to Recap.`
+              : "";
         setStatus(
-          data.sent.length > 0
+          (data.sent.length > 0
             ? `Sent ${data.sent.length} digest${data.sent.length > 1 ? "s" : ""}.`
-            : "Nothing to send — no meeting has assigned recipients yet."
+            : "Nothing to send — no meeting has assigned recipients yet.") + recapNote
         );
+        setStatusIsError(data.recapFailed?.length > 0);
         await refreshAll(false);
       }
     } catch (err: any) {
@@ -449,13 +492,11 @@ export default function DashboardPage() {
 
   if (loading) return <div className="loading-screen">Loading...</div>;
 
+  // Only recipients gate whether the button is clickable at all - a meeting
+  // missing its (also-required) workspace still shows the "needs" badge and
+  // is skipped server-side, but doesn't lock out sending everything else.
   const sendableMeetingIds = meetings
-    .filter(
-      (m) =>
-        (sendEnabled[m.id] ?? true) &&
-        effectiveRecipients(m).length > 0 &&
-        (workspaces[m.id] ?? "").trim().length > 0
-    )
+    .filter((m) => (sendEnabled[m.id] ?? true) && effectiveRecipients(m).length > 0)
     .map((m) => m.id);
   const allPanelsIncluded = meetings.every((m) => sendEnabled[m.id] ?? true);
 
@@ -481,7 +522,9 @@ export default function DashboardPage() {
           allRecipients={recipients}
           assigned={effectiveRecipients(m)}
           includedInSend={sendEnabled[m.id] ?? true}
-          workspace={workspaces[m.id] ?? ""}
+          workspace={workspaces[m.id]}
+          recapWorkspaces={recapWorkspaces}
+          recapConfigured={recapConfigured}
           onToggleRecipient={toggleRecipient}
           onSelectAll={selectAll}
           onAddEmail={addEmail}
