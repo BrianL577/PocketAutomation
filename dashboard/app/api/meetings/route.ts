@@ -3,7 +3,10 @@ import { getMeetingsSince } from "../../../lib/pocket";
 import { pruneStaleMeetingState } from "../../../lib/cleanup";
 
 export const maxDuration = 60;
-export const dynamic = "force-dynamic";
+// Time-based revalidation (not force-dynamic/no-store): lets Next serve the
+// same cached response to concurrent requests within the window instead of
+// hitting Pocket's rate-limited API on every single page load/poll.
+export const revalidate = 30;
 
 export async function GET() {
   const since = new Date();
