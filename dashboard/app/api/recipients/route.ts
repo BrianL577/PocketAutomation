@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { listRecipients, addRecipient, removeRecipient } from "../../../lib/recipients";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const recipients = await listRecipients();
   return NextResponse.json({ recipients });

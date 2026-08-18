@@ -29,7 +29,7 @@ async function listRecordings(limit = 100) {
   url.searchParams.set("limit", String(limit));
   url.searchParams.set("sort", "-created_at");
 
-  const resp = await fetch(url, { headers: pocketHeaders() });
+  const resp = await fetch(url, { headers: pocketHeaders(), cache: "no-store" });
   if (!resp.ok) throw new Error(`Pocket list error ${resp.status}`);
   const json = await resp.json();
   return json.data as Array<{
@@ -44,6 +44,7 @@ async function listRecordings(limit = 100) {
 async function getRecordingDetail(id: string) {
   const resp = await fetch(`${POCKET_BASE_URL}/public/recordings/${id}`, {
     headers: pocketHeaders(),
+    cache: "no-store",
   });
   if (!resp.ok) throw new Error(`Pocket detail error ${resp.status}`);
   const json = await resp.json();

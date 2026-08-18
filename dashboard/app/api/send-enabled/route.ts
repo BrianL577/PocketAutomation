@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSendEnabled, setSendEnabled } from "../../../lib/sendEnabled";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const sendEnabled = await getSendEnabled();
   return NextResponse.json({ sendEnabled });

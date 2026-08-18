@@ -109,23 +109,32 @@ function MeetingPanel({
   allRecipients,
   assigned,
   includedInSend,
+  workspace,
   onToggleRecipient,
   onSelectAll,
   onAddEmail,
   onDeleteEmail,
   onToggleIncluded,
+  onWorkspaceChange,
 }: {
   meeting: Meeting;
   allRecipients: string[];
   assigned: string[];
   includedInSend: boolean;
+  workspace: string;
   onToggleRecipient: (meetingId: string, email: string) => void;
   onSelectAll: (meetingId: string) => void;
   onAddEmail: (meetingId: string, email: string) => void;
   onDeleteEmail: (email: string) => void;
   onToggleIncluded: (meetingId: string) => void;
+  onWorkspaceChange: (meetingId: string, workspace: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [workspaceDraft, setWorkspaceDraft] = useState(workspace);
+
+  useEffect(() => {
+    setWorkspaceDraft(workspace);
+  }, [workspace]);
 
   return (
     <div className="panel">
@@ -160,6 +169,9 @@ function MeetingPanel({
             {assigned.length} recipient{assigned.length > 1 ? "s" : ""}
           </span>
         )}
+        {includedInSend && (assigned.length === 0 || !workspace.trim()) && (
+          <span className="missing-badge">Needs recipients &amp; workspace</span>
+        )}
       </div>
 
       {open && (
@@ -179,7 +191,7 @@ function MeetingPanel({
             </ul>
           )}
 
-          <div className="recipients-label">Send to</div>
+          <div className="recipients-label">Send to (required)</div>
           <RecipientChips
             allRecipients={allRecipients}
             assigned={assigned}
@@ -187,6 +199,17 @@ function MeetingPanel({
             onSelectAll={() => onSelectAll(meeting.id)}
             onAddEmail={(email) => onAddEmail(meeting.id, email)}
             onDeleteEmail={onDeleteEmail}
+          />
+
+          <div className="recipients-label workspace-label">Recap workspace (required)</div>
+          <input
+            className={`workspace-input ${!workspaceDraft.trim() ? "empty" : ""}`}
+            placeholder="e.g. Client X / Q3 Planning"
+            value={workspaceDraft}
+            onChange={(e) => setWorkspaceDraft(e.target.value)}
+            onBlur={() => {
+              if (workspaceDraft !== workspace) onWorkspaceChange(meeting.id, workspaceDraft);
+            }}
           />
         </div>
       )}
@@ -196,32 +219,24 @@ function MeetingPanel({
 
 function TagRoutingPanel({
   tags,
-  allRecipients,
   tagRecipients,
-  onToggle,
-  onSelectAll,
-  onAddEmail,
-  onDeleteEmail,
 }: {
   tags: string[];
-  allRecipients: string[];
   tagRecipients: Record<string, string[]>;
-  onToggle: (tag: string, email: string) => void;
-  onSelectAll: (tag: string) => void;
-  onAddEmail: (tag: string, email: string) => void;
-  onDeleteEmail: (email: string) => void;
 }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="panel">
+    <div className="panel panel-disabled">
       <div className="panel-header" onClick={() => setOpen((o) => !o)}>
         <Chevron open={open} />
         <div className="panel-header-text">
-          <div className="panel-title">Tag Routing</div>
+          <div className="panel-title">
+            Tag Routing <span className="disabled-badge">Disabled</span>
+          </div>
           <div className="panel-meta">
-            Auto-assign recipients to a Pocket tag - any new recording carrying that tag routes here
-            automatically.
+            Auto-routing by tag has been turned off. Assign recipients and a Recap workspace on each
+            meeting below instead.
           </div>
         </div>
       </div>
@@ -232,14 +247,17 @@ function TagRoutingPanel({
           {tags.map((tag) => (
             <div key={tag} className="tag-route-row">
               <div className="tag-route-label">{tag}</div>
-              <RecipientChips
-                allRecipients={allRecipients}
-                assigned={tagRecipients[tag] ?? []}
-                onToggle={(email) => onToggle(tag, email)}
-                onSelectAll={() => onSelectAll(tag)}
-                onAddEmail={(email) => onAddEmail(tag, email)}
-                onDeleteEmail={onDeleteEmail}
-              />
+              <div className="chip-row">
+                {(tagRecipients[tag] ?? []).length === 0 ? (
+                  <span className="chip disabled">no recipients configured</span>
+                ) : (
+                  (tagRecipients[tag] ?? []).map((email) => (
+                    <span key={email} className="chip disabled">
+                      {email}
+                    </span>
+                  ))
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -254,6 +272,7 @@ export default function DashboardPage() {
   const [assignments, setAssignments] = useState<Record<string, string[]>>({});
   const [sendEnabled, setSendEnabledState] = useState<Record<string, boolean>>({});
   const [tagRecipients, setTagRecipients] = useState<Record<string, string[]>>({});
+  const [workspaces, setWorkspaces] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -269,17 +288,18 @@ export default function DashboardPage() {
     if (showLoadingScreen) setLoading(true);
     setStatus(null);
     try {
-      const [meetingsRes, recipientsRes, assignmentsRes, sendEnabledRes, tagRecipientsRes] =
+      const [meetingsRes, recipientsRes, assignmentsRes, sendEnabledRes, tagRecipientsRes, workspacesRes] =
         await Promise.all([
-          fetch("/api/meetings").then((r) => r.json()),
-          fetch("/api/recipients").then((r) => r.json()),
-          fetch("/api/assignments").then((r) => r.json()),
-          fetch("/api/send-enabled").then((r) => r.json()),
-          fetch("/api/tag-recipients").then((r) => r.json()),
+          fetch("/api/meetings", { cache: "no-store" }).then((r) => r.json()),
+          fetch("/api/recipients", { cache: "no-store" }).then((r) => r.json()),
+          fetch("/api/assignments", { cache: "no-store" }).then((r) => r.json()),
+          fetch("/api/send-enabled", { cache: "no-store" }).then((r) => r.json()),
+          fetch("/api/tag-recipients", { cache: "no-store" }).then((r) => r.json()),
+          fetch("/api/workspace", { cache: "no-store" }).then((r) => r.json()),
         ]);
       const firstError =
         meetingsRes.error || recipientsRes.error || assignmentsRes.error || sendEnabledRes.error ||
-        tagRecipientsRes.error;
+        tagRecipientsRes.error || workspacesRes.error;
       if (firstError) {
         setStatus(`Error loading data: ${firstError}`);
         setStatusIsError(true);
@@ -289,6 +309,7 @@ export default function DashboardPage() {
       setAssignments(assignmentsRes.assignments ?? {});
       setSendEnabledState(sendEnabledRes.sendEnabled ?? {});
       setTagRecipients(tagRecipientsRes.tagRecipients ?? {});
+      setWorkspaces(workspacesRes.workspaces ?? {});
     } catch (err: any) {
       setStatus(`Error loading data: ${err.message}`);
       setStatusIsError(true);
@@ -298,12 +319,7 @@ export default function DashboardPage() {
   }
 
   function effectiveRecipients(meeting: Meeting): string[] {
-    if (assignments[meeting.id]) return assignments[meeting.id];
-    const set = new Set<string>();
-    for (const tag of meeting.tags) {
-      for (const email of tagRecipients[tag] ?? []) set.add(email);
-    }
-    return Array.from(set);
+    return assignments[meeting.id] ?? [];
   }
 
   async function persistAssignment(meetingId: string, emails: string[]) {
@@ -329,25 +345,13 @@ export default function DashboardPage() {
     persistAssignment(meetingId, next);
   }
 
-  async function persistTagRecipients(tag: string, emails: string[]) {
-    setTagRecipients((prev) => ({ ...prev, [tag]: emails }));
-    await fetch("/api/tag-recipients", {
+  async function persistWorkspace(meetingId: string, workspace: string) {
+    setWorkspaces((prev) => ({ ...prev, [meetingId]: workspace }));
+    await fetch("/api/workspace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tag, emails }),
+      body: JSON.stringify({ meetingId, workspace }),
     });
-  }
-
-  function toggleTagRecipient(tag: string, email: string) {
-    const current = tagRecipients[tag] ?? [];
-    const next = current.includes(email) ? current.filter((e) => e !== email) : [...current, email];
-    persistTagRecipients(tag, next);
-  }
-
-  function selectAllForTag(tag: string) {
-    const current = tagRecipients[tag] ?? [];
-    const next = current.length === recipients.length ? [] : recipients;
-    persistTagRecipients(tag, next);
   }
 
   async function addEmail(meetingId: string, email: string) {
@@ -364,21 +368,6 @@ export default function DashboardPage() {
     const current = meeting ? effectiveRecipients(meeting) : assignments[meetingId] ?? [];
     if (!current.includes(email)) {
       persistAssignment(meetingId, [...current, email]);
-    }
-  }
-
-  async function addEmailForTag(tag: string, email: string) {
-    const res = await fetch("/api/recipients", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
-    const data = await res.json();
-    setRecipients(data.recipients ?? []);
-
-    const current = tagRecipients[tag] ?? [];
-    if (!current.includes(email)) {
-      persistTagRecipients(tag, [...current, email]);
     }
   }
 
@@ -461,7 +450,12 @@ export default function DashboardPage() {
   if (loading) return <div className="loading-screen">Loading...</div>;
 
   const sendableMeetingIds = meetings
-    .filter((m) => (sendEnabled[m.id] ?? true) && effectiveRecipients(m).length > 0)
+    .filter(
+      (m) =>
+        (sendEnabled[m.id] ?? true) &&
+        effectiveRecipients(m).length > 0 &&
+        (workspaces[m.id] ?? "").trim().length > 0
+    )
     .map((m) => m.id);
   const allPanelsIncluded = meetings.every((m) => sendEnabled[m.id] ?? true);
 
@@ -469,19 +463,14 @@ export default function DashboardPage() {
     <div className="page">
       <div className="header">
         <h1>Pocket Meeting Dashboard</h1>
-        <p>Every new recording shows up here automatically and sends at 5 AM ET unless you turn it off.</p>
+        <p>
+          New recordings show up here automatically. Sending is manual: type the recipients and Recap
+          workspace for each meeting, then hit Send.
+        </p>
       </div>
 
       <div className="section-title">Tag Routing</div>
-      <TagRoutingPanel
-        tags={allTags}
-        allRecipients={recipients}
-        tagRecipients={tagRecipients}
-        onToggle={toggleTagRecipient}
-        onSelectAll={selectAllForTag}
-        onAddEmail={addEmailForTag}
-        onDeleteEmail={deleteEmail}
-      />
+      <TagRoutingPanel tags={allTags} tagRecipients={tagRecipients} />
 
       <div className="section-title">Meetings</div>
       {meetings.length === 0 && <div className="empty">No meetings found in the last 7 days.</div>}
@@ -492,11 +481,13 @@ export default function DashboardPage() {
           allRecipients={recipients}
           assigned={effectiveRecipients(m)}
           includedInSend={sendEnabled[m.id] ?? true}
+          workspace={workspaces[m.id] ?? ""}
           onToggleRecipient={toggleRecipient}
           onSelectAll={selectAll}
           onAddEmail={addEmail}
           onDeleteEmail={deleteEmail}
           onToggleIncluded={toggleIncluded}
+          onWorkspaceChange={persistWorkspace}
         />
       ))}
 

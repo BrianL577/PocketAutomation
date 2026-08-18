@@ -3,6 +3,7 @@ import { getMeetingsSince } from "../../../lib/pocket";
 import { pruneStaleMeetingState } from "../../../lib/cleanup";
 
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   const since = new Date();
