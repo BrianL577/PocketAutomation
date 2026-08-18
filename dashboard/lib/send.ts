@@ -3,6 +3,7 @@ import { getMeetingsSince, type Meeting } from "./pocket";
 import { getAssignments } from "./assignments";
 import { getSendEnabled, setSendEnabled } from "./sendEnabled";
 import { getWorkspaces } from "./workspaces";
+import { pushRecapEntry, RecapNotConfiguredError } from "./recap";
 
 function markdownToHtml(md: string): string {
   return md
@@ -71,6 +72,8 @@ function buildEmailHtml(m: Meeting, workspace: string): string {
 export interface SendResult {
   sent: string[];
   skipped: string[];
+  recapPushed: string[];
+  recapFailed: { meetingId: string; error: string }[];
 }
 
 /** Sends one digest email per recording to the recipients a person has
@@ -106,6 +109,8 @@ export async function sendAssignedDigests(): Promise<SendResult> {
 
   const sent: string[] = [];
   const skipped: string[] = [];
+  const recapPushed: string[] = [];
+  const recapFailed: { meetingId: string; error: string }[] = [];
 
   for (const meeting of meetings) {
     if (sendEnabled[meeting.id] === false) {
@@ -119,8 +124,8 @@ export async function sendAssignedDigests(): Promise<SendResult> {
     }
 
     const recipients = assignments[meeting.id] ?? [];
-    const workspace = (workspaces[meeting.id] ?? "").trim();
-    if (recipients.length === 0 || !workspace) {
+    const workspace = workspaces[meeting.id];
+    if (recipients.length === 0 || !workspace?.id) {
       skipped.push(meeting.id);
       continue;
     }
@@ -129,12 +134,29 @@ export async function sendAssignedDigests(): Promise<SendResult> {
       from: gmailAddress,
       to: recipients.join(", "),
       subject: `Meeting Summary: ${meeting.title}`,
-      html: buildEmailHtml(meeting, workspace),
+      html: buildEmailHtml(meeting, workspace.name),
     });
     sent.push(meeting.id);
+
+    // The email already went out - a Recap hiccup shouldn't be reported as a
+    // failed send, just surfaced separately so it can be retried/noticed.
+    try {
+      await pushRecapEntry(workspace.id, {
+        source: "pocket",
+        externalId: meeting.id,
+        text: meeting.summaryMarkdown,
+        title: meeting.title,
+        tagNames: meeting.tags,
+      });
+      recapPushed.push(meeting.id);
+    } catch (err: any) {
+      if (!(err instanceof RecapNotConfiguredError)) {
+        recapFailed.push({ meetingId: meeting.id, error: err.message });
+      }
+    }
   }
 
   await Promise.all(sent.map((id) => setSendEnabled(id, false)));
 
-  return { sent, skipped };
+  return { sent, skipped, recapPushed, recapFailed };
 }

@@ -9,11 +9,11 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { meetingId, workspace } = await req.json();
-  if (!meetingId || typeof workspace !== "string") {
+  const { meetingId, workspaceId, workspaceName } = await req.json();
+  if (!meetingId || typeof workspaceId !== "string" || typeof workspaceName !== "string") {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
-  await setWorkspace(meetingId, workspace);
+  await setWorkspace(meetingId, { id: workspaceId, name: workspaceName });
   const workspaces = await getWorkspaces();
   return NextResponse.json({ workspaces });
 }
