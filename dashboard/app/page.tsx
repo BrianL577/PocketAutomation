@@ -119,7 +119,7 @@ function MeetingPanel({
   allRecipients,
   assigned,
   includedInSend,
-  workspace,
+  workspaces,
   recapWorkspaces,
   recapConfigured,
   onToggleRecipient,
@@ -127,13 +127,13 @@ function MeetingPanel({
   onAddEmail,
   onDeleteEmail,
   onToggleIncluded,
-  onWorkspaceChange,
+  onWorkspacesChange,
 }: {
   meeting: Meeting;
   allRecipients: string[];
   assigned: string[];
   includedInSend: boolean;
-  workspace: MeetingWorkspace | undefined;
+  workspaces: MeetingWorkspace[];
   recapWorkspaces: RecapWorkspace[];
   recapConfigured: boolean;
   onToggleRecipient: (meetingId: string, email: string) => void;
@@ -141,10 +141,16 @@ function MeetingPanel({
   onAddEmail: (meetingId: string, email: string) => void;
   onDeleteEmail: (email: string) => void;
   onToggleIncluded: (meetingId: string) => void;
-  onWorkspaceChange: (meetingId: string, workspaceId: string, workspaceName: string) => void;
+  onWorkspacesChange: (meetingId: string, workspaces: MeetingWorkspace[]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const hasWorkspace = !!workspace?.id;
+  const hasWorkspace = workspaces.length > 0;
+
+  function toggleWorkspace(w: RecapWorkspace) {
+    const already = workspaces.some((x) => x.id === w.id);
+    const next = already ? workspaces.filter((x) => x.id !== w.id) : [...workspaces, { id: w.id, name: w.name }];
+    onWorkspacesChange(meeting.id, next);
+  }
 
   return (
     <div className="panel">
@@ -179,8 +185,11 @@ function MeetingPanel({
             {assigned.length} recipient{assigned.length > 1 ? "s" : ""}
           </span>
         )}
-        {includedInSend && (assigned.length === 0 || !hasWorkspace) && (
-          <span className="missing-badge">Needs recipients &amp; workspace</span>
+        {includedInSend && assigned.length === 0 && (
+          <span className="missing-badge">Needs recipients</span>
+        )}
+        {includedInSend && assigned.length > 0 && recapConfigured && !hasWorkspace && (
+          <span className="info-badge">Not synced to Recap</span>
         )}
       </div>
 
@@ -211,28 +220,26 @@ function MeetingPanel({
             onDeleteEmail={onDeleteEmail}
           />
 
-          <div className="recipients-label workspace-label">Recap workspace (required)</div>
+          <div className="recipients-label workspace-label">Recap workspaces (optional)</div>
           {recapConfigured ? (
-            <select
-              className={`workspace-select ${!hasWorkspace ? "empty" : ""}`}
-              value={workspace?.id ?? ""}
-              onChange={(e) => {
-                const chosen = recapWorkspaces.find((w) => w.id === e.target.value);
-                if (chosen) onWorkspaceChange(meeting.id, chosen.id, chosen.name);
-              }}
-            >
-              <option value="" disabled>
-                Select a workspace...
-              </option>
-              {recapWorkspaces.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
+            recapWorkspaces.length === 0 ? (
+              <div className="empty">No workspaces available to this Recap key.</div>
+            ) : (
+              <div className="chip-row">
+                {recapWorkspaces.map((w) => (
+                  <button
+                    key={w.id}
+                    className={`chip ${workspaces.some((x) => x.id === w.id) ? "selected" : ""}`}
+                    onClick={() => toggleWorkspace(w)}
+                  >
+                    {w.name}
+                  </button>
+                ))}
+              </div>
+            )
           ) : (
             <div className="workspace-unconfigured">
-              Recap isn't connected yet - set RECAP_BASE_URL and RECAP_API_KEY to pick a workspace here.
+              Recap isn't connected yet - set RECAP_BASE_URL and RECAP_API_KEY to sync entries there.
             </div>
           )}
         </div>
@@ -296,7 +303,7 @@ export default function DashboardPage() {
   const [assignments, setAssignments] = useState<Record<string, string[]>>({});
   const [sendEnabled, setSendEnabledState] = useState<Record<string, boolean>>({});
   const [tagRecipients, setTagRecipients] = useState<Record<string, string[]>>({});
-  const [workspaces, setWorkspaces] = useState<Record<string, MeetingWorkspace>>({});
+  const [workspaces, setWorkspaces] = useState<Record<string, MeetingWorkspace[]>>({});
   const [recapWorkspaces, setRecapWorkspaces] = useState<RecapWorkspace[]>([]);
   const [recapConfigured, setRecapConfigured] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -381,12 +388,12 @@ export default function DashboardPage() {
     persistAssignment(meetingId, next);
   }
 
-  async function persistWorkspace(meetingId: string, workspaceId: string, workspaceName: string) {
-    setWorkspaces((prev) => ({ ...prev, [meetingId]: { id: workspaceId, name: workspaceName } }));
+  async function persistWorkspaces(meetingId: string, meetingWorkspaces: MeetingWorkspace[]) {
+    setWorkspaces((prev) => ({ ...prev, [meetingId]: meetingWorkspaces }));
     await fetch("/api/workspace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ meetingId, workspaceId, workspaceName }),
+      body: JSON.stringify({ meetingId, workspaces: meetingWorkspaces }),
     });
   }
 
@@ -463,9 +470,9 @@ export default function DashboardPage() {
       } else {
         const recapNote =
           data.recapFailed?.length > 0
-            ? ` Recap push failed for ${data.recapFailed.length} meeting${data.recapFailed.length > 1 ? "s" : ""} (email still sent).`
+            ? ` ${data.recapFailed.length} Recap push${data.recapFailed.length > 1 ? "es" : ""} failed (email still sent).`
             : data.recapPushed?.length > 0
-              ? ` Pushed ${data.recapPushed.length} to Recap.`
+              ? ` Pushed ${data.recapPushed.length} entr${data.recapPushed.length > 1 ? "ies" : "y"} to Recap.`
               : "";
         setStatus(
           (data.sent.length > 0
@@ -505,8 +512,9 @@ export default function DashboardPage() {
       <div className="header">
         <h1>Pocket Meeting Dashboard</h1>
         <p>
-          New recordings show up here automatically. Sending is manual: type the recipients and Recap
-          workspace for each meeting, then hit Send.
+          New recordings show up here automatically. Sending is manual: assign recipients per meeting,
+          then hit Send. Recap workspaces are optional - pick one or more to also sync that meeting's
+          entry there.
         </p>
       </div>
 
@@ -522,7 +530,7 @@ export default function DashboardPage() {
           allRecipients={recipients}
           assigned={effectiveRecipients(m)}
           includedInSend={sendEnabled[m.id] ?? true}
-          workspace={workspaces[m.id]}
+          workspaces={workspaces[m.id] ?? []}
           recapWorkspaces={recapWorkspaces}
           recapConfigured={recapConfigured}
           onToggleRecipient={toggleRecipient}
@@ -530,7 +538,7 @@ export default function DashboardPage() {
           onAddEmail={addEmail}
           onDeleteEmail={deleteEmail}
           onToggleIncluded={toggleIncluded}
-          onWorkspaceChange={persistWorkspace}
+          onWorkspacesChange={persistWorkspaces}
         />
       ))}
 
