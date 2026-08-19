@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { markdownToHtml } from "../lib/markdown";
 
 interface ActionItem {
   label: string;
@@ -144,11 +145,17 @@ function MeetingPanel({
   onWorkspacesChange: (meetingId: string, workspaces: MeetingWorkspace[]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const hasWorkspace = workspaces.length > 0;
+  // Guard against any stale/malformed shape reaching this component (a
+  // legacy single-object KV entry, a bad API response, etc.) - never let a
+  // data hiccup crash the panel someone is trying to open.
+  const safeWorkspaces = Array.isArray(workspaces) ? workspaces : [];
+  const hasWorkspace = safeWorkspaces.length > 0;
 
   function toggleWorkspace(w: RecapWorkspace) {
-    const already = workspaces.some((x) => x.id === w.id);
-    const next = already ? workspaces.filter((x) => x.id !== w.id) : [...workspaces, { id: w.id, name: w.name }];
+    const already = safeWorkspaces.some((x) => x.id === w.id);
+    const next = already
+      ? safeWorkspaces.filter((x) => x.id !== w.id)
+      : [...safeWorkspaces, { id: w.id, name: w.name }];
     onWorkspacesChange(meeting.id, next);
   }
 
@@ -195,11 +202,14 @@ function MeetingPanel({
 
       {open && (
         <div className="panel-body">
-          <div className="summary-text">
-            {meeting.isProcessingComplete
-              ? meeting.summaryMarkdown
-              : "Summary still processing..."}
-          </div>
+          {meeting.isProcessingComplete ? (
+            <div
+              className="summary-text"
+              dangerouslySetInnerHTML={{ __html: markdownToHtml(meeting.summaryMarkdown) }}
+            />
+          ) : (
+            <div className="summary-text">Summary still processing...</div>
+          )}
           {meeting.actionItems.length > 0 && (
             <ul className="action-items">
               {meeting.actionItems.map((a, i) => (
@@ -229,7 +239,7 @@ function MeetingPanel({
                 {recapWorkspaces.map((w) => (
                   <button
                     key={w.id}
-                    className={`chip ${workspaces.some((x) => x.id === w.id) ? "selected" : ""}`}
+                    className={`chip ${safeWorkspaces.some((x) => x.id === w.id) ? "selected" : ""}`}
                     onClick={() => toggleWorkspace(w)}
                   >
                     {w.name}
@@ -350,8 +360,16 @@ export default function DashboardPage() {
       setAssignments(assignmentsRes.assignments ?? {});
       setSendEnabledState(sendEnabledRes.sendEnabled ?? {});
       setTagRecipients(tagRecipientsRes.tagRecipients ?? {});
-      setWorkspaces(workspacesRes.workspaces ?? {});
-      setRecapWorkspaces(recapWorkspacesRes.workspaces ?? []);
+      // Defensive: normalize server data even though the API already should -
+      // a meeting whose workspace list isn't an array (stale KV shape, bad
+      // response) must not crash the whole panel, just show as unset.
+      const rawWorkspaces = workspacesRes.workspaces ?? {};
+      const normalizedWorkspaces: Record<string, MeetingWorkspace[]> = {};
+      for (const [id, list] of Object.entries(rawWorkspaces)) {
+        normalizedWorkspaces[id] = Array.isArray(list) ? (list as MeetingWorkspace[]) : [];
+      }
+      setWorkspaces(normalizedWorkspaces);
+      setRecapWorkspaces(Array.isArray(recapWorkspacesRes.workspaces) ? recapWorkspacesRes.workspaces : []);
       setRecapConfigured(recapWorkspacesRes.configured !== false);
     } catch (err: any) {
       setStatus(`Error loading data: ${err.message}`);

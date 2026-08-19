@@ -4,22 +4,7 @@ import { getAssignments } from "./assignments";
 import { getSendEnabled, setSendEnabled } from "./sendEnabled";
 import { getWorkspaces } from "./workspaces";
 import { pushRecapEntry, RecapNotConfiguredError } from "./recap";
-
-function markdownToHtml(md: string): string {
-  return md
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/^#### (.+)$/gm, "<h4>$1</h4>")
-    .replace(/^### (.+)$/gm, "<h3>$1</h3>")
-    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
-    .replace(/^# (.+)$/gm, "<h1>$1</h1>")
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/^[-*] (.+)$/gm, "<li>$1</li>")
-    .replace(/\n{2,}/g, "</p><p>")
-    .trim();
-}
+import { markdownToHtml } from "./markdown";
 
 function buildEmailHtml(m: Meeting, workspaceNames: string[]): string {
   const actionItemsHtml = m.actionItems.length
@@ -50,8 +35,10 @@ function buildEmailHtml(m: Meeting, workspaceNames: string[]): string {
 <style>
   body { font-family: 'Nunito', Arial, sans-serif; font-size: 15px; color: #111; max-width: 680px; margin: 0 auto; padding: 24px; }
   h1, h2, h3, h4 { color: #1a1a1a; margin-top: 24px; }
+  h1 { font-size: 26px; }
   h2 { font-size: 22px; border-bottom: 2px solid #e0e0e0; padding-bottom: 8px; }
   h3 { font-size: 17px; }
+  h4 { font-size: 16px; }
   p { line-height: 1.6; }
   ul { padding-left: 20px; line-height: 1.8; }
   .meta { color: #666; font-size: 13px; margin-bottom: 20px; }
@@ -64,7 +51,7 @@ function buildEmailHtml(m: Meeting, workspaceNames: string[]): string {
   <div class="meta">${date}${workspaceMeta}</div>
   <hr class="divider">
   <div class="section-label">Summary</div>
-  <p>${summaryHtml}</p>
+  ${summaryHtml}
   <hr class="divider">
   <div class="section-label">Action Items</div>
   ${actionItemsHtml}
