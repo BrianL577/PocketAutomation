@@ -145,11 +145,22 @@ function MeetingPanel({
   onWorkspacesChange: (meetingId: string, workspaces: MeetingWorkspace[]) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [workspaceFilter, setWorkspaceFilter] = useState("");
   // Guard against any stale/malformed shape reaching this component (a
   // legacy single-object KV entry, a bad API response, etc.) - never let a
   // data hiccup crash the panel someone is trying to open.
   const safeWorkspaces = Array.isArray(workspaces) ? workspaces : [];
   const hasWorkspace = safeWorkspaces.length > 0;
+
+  // Already-selected workspaces stay visible even if a search narrows them
+  // out, so typing a filter can never hide (or make it look like you lost)
+  // a workspace you've already picked.
+  const query = workspaceFilter.trim().toLowerCase();
+  const visibleWorkspaces = query
+    ? recapWorkspaces.filter(
+        (w) => w.name.toLowerCase().includes(query) || safeWorkspaces.some((x) => x.id === w.id)
+      )
+    : recapWorkspaces;
 
   function toggleWorkspace(w: RecapWorkspace) {
     const already = safeWorkspaces.some((x) => x.id === w.id);
@@ -235,17 +246,31 @@ function MeetingPanel({
             recapWorkspaces.length === 0 ? (
               <div className="empty">No workspaces available to this Recap key.</div>
             ) : (
-              <div className="chip-row">
-                {recapWorkspaces.map((w) => (
-                  <button
-                    key={w.id}
-                    className={`chip ${safeWorkspaces.some((x) => x.id === w.id) ? "selected" : ""}`}
-                    onClick={() => toggleWorkspace(w)}
-                  >
-                    {w.name}
-                  </button>
-                ))}
-              </div>
+              <>
+                {recapWorkspaces.length > 5 && (
+                  <input
+                    className="workspace-search"
+                    placeholder="Search workspaces..."
+                    value={workspaceFilter}
+                    onChange={(e) => setWorkspaceFilter(e.target.value)}
+                  />
+                )}
+                <div className="chip-row">
+                  {visibleWorkspaces.length === 0 ? (
+                    <span className="empty-inline">No workspaces match &quot;{workspaceFilter}&quot;.</span>
+                  ) : (
+                    visibleWorkspaces.map((w) => (
+                      <button
+                        key={w.id}
+                        className={`chip ${safeWorkspaces.some((x) => x.id === w.id) ? "selected" : ""}`}
+                        onClick={() => toggleWorkspace(w)}
+                      >
+                        {w.name}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
             )
           ) : (
             <div className="workspace-unconfigured">
