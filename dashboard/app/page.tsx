@@ -203,11 +203,14 @@ function MeetingPanel({
             {assigned.length} recipient{assigned.length > 1 ? "s" : ""}
           </span>
         )}
-        {includedInSend && assigned.length === 0 && (
-          <span className="missing-badge">Needs recipients</span>
+        {includedInSend && assigned.length === 0 && !hasWorkspace && (
+          <span className="missing-badge">Needs recipients or a workspace</span>
         )}
         {includedInSend && assigned.length > 0 && recapConfigured && !hasWorkspace && (
           <span className="info-badge">Not synced to Recap</span>
+        )}
+        {includedInSend && assigned.length === 0 && hasWorkspace && (
+          <span className="info-badge">Recap only - no email</span>
         )}
       </div>
 
@@ -231,7 +234,7 @@ function MeetingPanel({
             </ul>
           )}
 
-          <div className="recipients-label">Send to (required)</div>
+          <div className="recipients-label">Send to (email)</div>
           <RecipientChips
             allRecipients={allRecipients}
             assigned={assigned}
@@ -241,7 +244,7 @@ function MeetingPanel({
             onDeleteEmail={onDeleteEmail}
           />
 
-          <div className="recipients-label workspace-label">Recap workspaces (optional)</div>
+          <div className="recipients-label workspace-label">Recap workspaces</div>
           {recapConfigured ? (
             recapWorkspaces.length === 0 ? (
               <div className="empty">No workspaces available to this Recap key.</div>
@@ -513,14 +516,16 @@ export default function DashboardPage() {
       } else {
         const recapNote =
           data.recapFailed?.length > 0
-            ? ` ${data.recapFailed.length} Recap push${data.recapFailed.length > 1 ? "es" : ""} failed (email still sent).`
+            ? ` ${data.recapFailed.length} Recap push${data.recapFailed.length > 1 ? "es" : ""} failed.`
             : data.recapPushed?.length > 0
               ? ` Pushed ${data.recapPushed.length} entr${data.recapPushed.length > 1 ? "ies" : "y"} to Recap.`
               : "";
+        const emailNote =
+          data.sent.length > 0 ? `Sent ${data.sent.length} digest${data.sent.length > 1 ? "s" : ""}.` : "";
         setStatus(
-          (data.sent.length > 0
-            ? `Sent ${data.sent.length} digest${data.sent.length > 1 ? "s" : ""}.`
-            : "Nothing to send — no meeting has assigned recipients yet.") + recapNote
+          emailNote || recapNote
+            ? `${emailNote}${recapNote}`.trim()
+            : "Nothing to send — no meeting has recipients or a Recap workspace assigned yet."
         );
         setStatusIsError(data.recapFailed?.length > 0);
         await refreshAll(false);
@@ -542,11 +547,15 @@ export default function DashboardPage() {
 
   if (loading) return <div className="loading-screen">Loading...</div>;
 
-  // Only recipients gate whether the button is clickable at all - a meeting
-  // missing its (also-required) workspace still shows the "needs" badge and
-  // is skipped server-side, but doesn't lock out sending everything else.
+  // A meeting is sendable with recipients, a Recap workspace, or both -
+  // either destination alone is enough to enable the button. A meeting
+  // with neither still shows the "needs" badge and is skipped server-side.
   const sendableMeetingIds = meetings
-    .filter((m) => (sendEnabled[m.id] ?? true) && effectiveRecipients(m).length > 0)
+    .filter(
+      (m) =>
+        (sendEnabled[m.id] ?? true) &&
+        (effectiveRecipients(m).length > 0 || (workspaces[m.id]?.length ?? 0) > 0)
+    )
     .map((m) => m.id);
   const allPanelsIncluded = meetings.every((m) => sendEnabled[m.id] ?? true);
 
@@ -555,9 +564,8 @@ export default function DashboardPage() {
       <div className="header">
         <h1>Pocket Meeting Dashboard</h1>
         <p>
-          New recordings show up here automatically. Sending is manual: assign recipients per meeting,
-          then hit Send. Recap workspaces are optional - pick one or more to also sync that meeting's
-          entry there.
+          New recordings show up here automatically. Sending is manual: assign recipients, pick Recap
+          workspaces, or both, per meeting, then hit Send - either destination alone is enough.
         </p>
       </div>
 

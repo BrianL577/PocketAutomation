@@ -59,6 +59,17 @@ function buildEmailHtml(m: Meeting, workspaceNames: string[]): string {
 </html>`;
 }
 
+/** Recap entries get a "YY.MM.DD: Pocket Summary." line ahead of the actual
+ * summary text, dated to when the meeting happened (not when it's pushed).
+ */
+function recapEntryText(m: Meeting): string {
+  const d = new Date(m.createdAt);
+  const yy = String(d.getFullYear()).slice(-2);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yy}.${mm}.${dd}: Pocket Summary.\n\n${m.summaryMarkdown}`;
+}
+
 export interface SendResult {
   sent: string[];
   skipped: string[];
@@ -66,15 +77,15 @@ export interface SendResult {
   recapFailed: { meetingId: string; workspaceId: string; error: string }[];
 }
 
-/** Sends one digest email per recording to the recipients a person has
- * manually assigned to it - that's the only requirement to send. Recap
- * workspaces are optional and independent: a meeting with recipients but no
- * workspace still emails fine, it just doesn't sync to Recap. A meeting can
- * also be filed under more than one workspace, each pushed separately.
- * Explicitly toggled-off recordings are skipped - there is no automatic
- * tag-based routing. Anything successfully emailed gets its "included"
- * toggle flipped off afterward, so the next send (manual or the 5am cron)
- * doesn't re-send the same recording unless a person manually re-checks it.
+/** Delivers each meeting to whichever destination(s) a person has set up
+ * for it - email recipients, Recap workspaces, or both. Either alone is
+ * enough to act on; a meeting with only a workspace picked (no recipients)
+ * still pushes to Recap and gets unchecked, and vice versa. A meeting with
+ * neither, or explicitly toggled off, is skipped - there is no automatic
+ * tag-based routing. A meeting only gets its "included" toggle flipped off
+ * once something about it actually succeeded (an email sent, or at least
+ * one Recap push), so a Recap-only meeting whose push fails stays checked
+ * for the next attempt instead of silently disappearing.
  */
 export async function sendAssignedDigests(): Promise<SendResult> {
   const since = new Date();
@@ -90,19 +101,14 @@ export async function sendAssignedDigests(): Promise<SendResult> {
 
   const gmailAddress = process.env.GMAIL_ADDRESS;
   const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
-  if (!gmailAddress || !gmailAppPassword) {
-    throw new Error("Gmail credentials not configured");
-  }
-
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: gmailAddress, pass: gmailAppPassword },
-  });
 
   const sent: string[] = [];
   const skipped: string[] = [];
   const recapPushed: { meetingId: string; workspaceId: string }[] = [];
   const recapFailed: { meetingId: string; workspaceId: string; error: string }[] = [];
+  const handled = new Set<string>();
+
+  let transporter: nodemailer.Transporter | null = null;
 
   for (const meeting of meetings) {
     if (sendEnabled[meeting.id] === false) {
@@ -116,34 +122,46 @@ export async function sendAssignedDigests(): Promise<SendResult> {
     }
 
     const recipients = assignments[meeting.id] ?? [];
-    if (recipients.length === 0) {
+    const meetingWorkspaces = workspaces[meeting.id] ?? [];
+
+    if (recipients.length === 0 && meetingWorkspaces.length === 0) {
       skipped.push(meeting.id);
       continue;
     }
 
-    const meetingWorkspaces = workspaces[meeting.id] ?? [];
+    if (recipients.length > 0) {
+      if (!gmailAddress || !gmailAppPassword) {
+        throw new Error("Gmail credentials not configured");
+      }
+      transporter ??= nodemailer.createTransport({
+        service: "gmail",
+        auth: { user: gmailAddress, pass: gmailAppPassword },
+      });
 
-    await transporter.sendMail({
-      from: gmailAddress,
-      to: recipients.join(", "),
-      subject: `Meeting Summary: ${meeting.title}`,
-      html: buildEmailHtml(meeting, meetingWorkspaces.map((w) => w.name)),
-    });
-    sent.push(meeting.id);
+      await transporter.sendMail({
+        from: gmailAddress,
+        to: recipients.join(", "),
+        subject: `Meeting Summary: ${meeting.title}`,
+        html: buildEmailHtml(meeting, meetingWorkspaces.map((w) => w.name)),
+      });
+      sent.push(meeting.id);
+      handled.add(meeting.id);
+    }
 
-    // The email already went out - a Recap hiccup shouldn't be reported as a
-    // failed send, just surfaced separately so it can be retried/noticed.
-    // No workspace picked is a normal, non-error case - nothing to push.
+    // The email (if any) already went out - a Recap hiccup shouldn't be
+    // reported as a failed send, just surfaced separately so it can be
+    // retried/noticed. No workspace picked is a normal, non-error case.
     for (const workspace of meetingWorkspaces) {
       try {
         await pushRecapEntry(workspace.id, {
           source: "pocket",
           externalId: meeting.id,
-          text: meeting.summaryMarkdown,
+          text: recapEntryText(meeting),
           title: meeting.title,
           tagNames: meeting.tags,
         });
         recapPushed.push({ meetingId: meeting.id, workspaceId: workspace.id });
+        handled.add(meeting.id);
       } catch (err: any) {
         if (!(err instanceof RecapNotConfiguredError)) {
           recapFailed.push({ meetingId: meeting.id, workspaceId: workspace.id, error: err.message });
@@ -152,7 +170,7 @@ export async function sendAssignedDigests(): Promise<SendResult> {
     }
   }
 
-  await Promise.all(sent.map((id) => setSendEnabled(id, false)));
+  await Promise.all(Array.from(handled).map((id) => setSendEnabled(id, false)));
 
   return { sent, skipped, recapPushed, recapFailed };
 }
