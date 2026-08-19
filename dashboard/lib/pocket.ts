@@ -72,24 +72,34 @@ async function getRecordingDetail(id: string) {
   return json.data;
 }
 
-function extractSummaryAndActionItems(detail: any): { summary: string; actionItems: ActionItem[] } {
-  const summarizations = detail.summarizations || {};
-  const firstKey = Object.keys(summarizations)[0];
-  if (!firstKey) return { summary: "", actionItems: [] };
-
-  const v2 = summarizations[firstKey].v2 || {};
-  const summary = v2.summary?.markdown || "";
-  const rawActions = v2.actionItems?.actions || [];
-
-  const actionItems: ActionItem[] = rawActions.map((a: any) => ({
+function actionItemsFrom(rawActions: any[]): ActionItem[] {
+  return rawActions.map((a: any) => ({
     label: a.label,
     assignee: a.assignee,
     priority: a.priority,
     dueDate: a.dueDate ?? null,
     isCompleted: !!(a.isCompleted ?? a.is_completed),
   }));
+}
 
-  return { summary, actionItems };
+/** Pocket recordings can carry more than one summarization run (e.g. a
+ * retry), so the first key isn't necessarily the finished one - check each
+ * until one actually has markdown. If none of them do (or the recording
+ * predates that nested shape), fall back to whatever plausible top-level
+ * summary field is present rather than declaring the meeting unprocessed.
+ */
+function extractSummaryAndActionItems(detail: any): { summary: string; actionItems: ActionItem[] } {
+  const summarizations = detail.summarizations || {};
+  for (const key of Object.keys(summarizations)) {
+    const v2 = summarizations[key]?.v2;
+    const markdown = v2?.summary?.markdown;
+    if (markdown) {
+      return { summary: markdown, actionItems: actionItemsFrom(v2.actionItems?.actions || []) };
+    }
+  }
+
+  const fallbackSummary = detail.summary || detail.ai_summary || detail.summary_markdown || "";
+  return { summary: fallbackSummary, actionItems: [] };
 }
 
 /** Pulls recordings from the given start (inclusive) to now, skipping
@@ -108,7 +118,16 @@ export async function getMeetingsSince(sinceISO: string): Promise<Meeting[]> {
   });
 
   const details = await Promise.all(
-    candidates.map((rec) => getRecordingDetail(rec.id).catch(() => null))
+    candidates.map((rec) =>
+      getRecordingDetail(rec.id).catch((err) => {
+        // Previously swallowed entirely, which made a fetch failure look
+        // identical to "genuinely still processing" - log it so a
+        // persistent "still processing" panel is diagnosable from the
+        // Vercel function logs instead of being a black box.
+        console.error(`Pocket detail fetch failed for recording ${rec.id}:`, err?.message ?? err);
+        return null;
+      })
+    )
   );
 
   const meetings: Meeting[] = [];
