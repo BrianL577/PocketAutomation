@@ -59,15 +59,25 @@ function buildEmailHtml(m: Meeting, workspaceNames: string[]): string {
 </html>`;
 }
 
-/** Recap entries get a "YY.MM.DD: Pocket Summary." line ahead of the actual
- * summary text, dated to when the meeting happened (not when it's pushed).
- */
-function recapEntryText(m: Meeting): string {
-  const d = new Date(m.createdAt);
+/** YY.MM.DD, dated to when the meeting happened (not when it's pushed). */
+function dateTag(createdAt: string): string {
+  const d = new Date(createdAt);
   const yy = String(d.getFullYear()).slice(-2);
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
-  return `${yy}.${mm}.${dd}: Pocket Summary.\n\n${m.summaryMarkdown}`;
+  return `${yy}.${mm}.${dd}`;
+}
+
+/** Recap entries get a "YY.MM.DD: Pocket Summary." line ahead of the actual
+ * summary text.
+ */
+function recapEntryText(m: Meeting): string {
+  return `${dateTag(m.createdAt)}: Pocket Summary.\n\n${m.summaryMarkdown}`;
+}
+
+/** The entry's title is the date tag, not the Pocket meeting title. */
+function recapEntryTitle(m: Meeting): string {
+  return `${dateTag(m.createdAt)} Recap Summary`;
 }
 
 export interface SendResult {
@@ -157,7 +167,7 @@ export async function sendAssignedDigests(): Promise<SendResult> {
           source: "pocket",
           externalId: meeting.id,
           text: recapEntryText(meeting),
-          title: meeting.title,
+          title: recapEntryTitle(meeting),
           tagNames: meeting.tags,
         });
         recapPushed.push({ meetingId: meeting.id, workspaceId: workspace.id });
