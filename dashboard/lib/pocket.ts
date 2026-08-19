@@ -31,12 +31,16 @@ function pocketHeaders() {
 // dashboard well within "real time" for a meeting summary tool.
 const REVALIDATE_SECONDS = 30;
 
-async function pocketFetch(url: string | URL, retryOn429 = true): Promise<Response> {
+async function pocketFetch(url: string | URL, canRetry = true): Promise<Response> {
   const resp = await fetch(url, {
     headers: pocketHeaders(),
     next: { revalidate: REVALIDATE_SECONDS },
   });
-  if (resp.status === 429 && retryOn429) {
+  // A transient 429/5xx from Pocket used to get silently swallowed by the
+  // caller's .catch(() => null) and shown as "still processing" - retrying
+  // once here means a blip doesn't make a finished meeting flicker between
+  // "done" and "processing" depending on which poll happened to land on it.
+  if ((resp.status === 429 || resp.status >= 500) && canRetry) {
     const retryAfter = Number(resp.headers.get("retry-after"));
     await new Promise((r) => setTimeout(r, Number.isFinite(retryAfter) ? retryAfter * 1000 : 1500));
     return pocketFetch(url, false);
@@ -122,7 +126,12 @@ export async function getMeetingsSince(sinceISO: string): Promise<Meeting[]> {
       createdAt: rec.created_at,
       summaryMarkdown: summary,
       actionItems,
-      isProcessingComplete: !!detail && detail.state === "completed",
+      // Trust whatever Pocket actually handed back over its own state
+      // label: some recordings carry a finished summary under a state
+      // string that never equals exactly "completed", which made the
+      // dashboard show "still processing" even though Pocket itself
+      // considers the content ready.
+      isProcessingComplete: !!detail && (detail.state === "completed" || !!summary),
     });
   }
 
