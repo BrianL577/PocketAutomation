@@ -80,6 +80,18 @@ function recapEntryTitle(m: Meeting): string {
   return `${dateTag(m.createdAt)} Recap Summary`;
 }
 
+/** Recap matches "source" + "externalId" to decide whether a push creates a
+ * new entry or updates an existing one, and that match isn't scoped to the
+ * workspace in the URL - just meeting.id would collide across every
+ * workspace a meeting is filed under, so pushing to a second workspace just
+ * moves/updates the entry that already exists in the first one instead of
+ * filing a separate entry there. Scoping the id to the workspace keeps each
+ * workspace's entry independently tracked.
+ */
+function recapExternalId(meetingId: string, workspaceId: string): string {
+  return `${meetingId}:${workspaceId}`;
+}
+
 export interface SendResult {
   sent: string[];
   skipped: string[];
@@ -165,7 +177,7 @@ export async function sendAssignedDigests(): Promise<SendResult> {
       try {
         await pushRecapEntry(workspace.id, {
           source: "pocket",
-          externalId: meeting.id,
+          externalId: recapExternalId(meeting.id, workspace.id),
           text: recapEntryText(meeting),
           title: recapEntryTitle(meeting),
           tagNames: meeting.tags,
