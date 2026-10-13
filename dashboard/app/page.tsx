@@ -184,7 +184,7 @@ function MeetingPanel({
         <div className="panel-header-text">
           <div className="panel-title">{meeting.title}</div>
           <div className="panel-meta">
-            {new Date(meeting.createdAt).toLocaleString()}
+            {new Date(meeting.createdAt).toLocaleString("en-US", { timeZone: "America/New_York", timeZoneName: "short" })}
             {meeting.tags.length > 0 && (
               <>
                 {" "}

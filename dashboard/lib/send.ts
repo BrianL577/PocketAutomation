@@ -5,6 +5,8 @@ import { getSendEnabled, setSendEnabled } from "./sendEnabled";
 import { getWorkspaces } from "./workspaces";
 import { pushRecapEntry, RecapNotConfiguredError } from "./recap";
 import { markdownToHtml } from "./markdown";
+import { kv } from "@vercel/kv";
+import { longDate, dateTagParts } from "./time";
 
 function buildEmailHtml(m: Meeting, workspaceNames: string[]): string {
   const actionItemsHtml = m.actionItems.length
@@ -20,9 +22,7 @@ function buildEmailHtml(m: Meeting, workspaceNames: string[]): string {
     : "<p>None</p>";
 
   const summaryHtml = markdownToHtml(m.summaryMarkdown);
-  const date = new Date(m.createdAt).toLocaleDateString("en-US", {
-    weekday: "long", year: "numeric", month: "long", day: "numeric",
-  });
+  const date = longDate(m.createdAt);
 
   const workspaceMeta =
     workspaceNames.length > 0 ? ` &middot; Recap: ${workspaceNames.join(", ")}` : "";
@@ -61,10 +61,7 @@ function buildEmailHtml(m: Meeting, workspaceNames: string[]): string {
 
 /** YY.MM.DD, dated to when the meeting happened (not when it's pushed). */
 function dateTag(createdAt: string): string {
-  const d = new Date(createdAt);
-  const yy = String(d.getFullYear()).slice(-2);
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
+  const { yy, mm, dd } = dateTagParts(createdAt);
   return `${yy}.${mm}.${dd}`;
 }
 
@@ -110,6 +107,22 @@ export interface SendResult {
  * for the next attempt instead of silently disappearing.
  */
 export async function sendAssignedDigests(): Promise<SendResult> {
+  // Send Now and the daily cron must never run at the same time: both read
+  // the same "still enabled" flags before either has flipped them, so an
+  // overlap sends every digest twice.
+  const lockKey = "sendLock";
+  const gotLock = await kv.set(lockKey, Date.now(), { nx: true, ex: 120 });
+  if (!gotLock) {
+    return { sent: [], skipped: [], recapPushed: [], recapFailed: [] };
+  }
+  try {
+    return await runSend();
+  } finally {
+    await kv.del(lockKey);
+  }
+}
+
+async function runSend(): Promise<SendResult> {
   const since = new Date();
   since.setDate(since.getDate() - 7);
   since.setHours(0, 0, 0, 0);
@@ -128,7 +141,6 @@ export async function sendAssignedDigests(): Promise<SendResult> {
   const skipped: string[] = [];
   const recapPushed: { meetingId: string; workspaceId: string }[] = [];
   const recapFailed: { meetingId: string; workspaceId: string; error: string }[] = [];
-  const handled = new Set<string>();
 
   let transporter: nodemailer.Transporter | null = null;
 
@@ -167,7 +179,10 @@ export async function sendAssignedDigests(): Promise<SendResult> {
         html: buildEmailHtml(meeting, meetingWorkspaces.map((w) => w.name)),
       });
       sent.push(meeting.id);
-      handled.add(meeting.id);
+      // Flip the flag the moment the email is out, not at the end of the
+      // run: if a later meeting throws or the function times out, this one
+      // must already be marked so the next run doesn't send it again.
+      await setSendEnabled(meeting.id, false);
     }
 
     // The email (if any) already went out - a Recap hiccup shouldn't be
@@ -183,7 +198,7 @@ export async function sendAssignedDigests(): Promise<SendResult> {
           tagNames: meeting.tags,
         });
         recapPushed.push({ meetingId: meeting.id, workspaceId: workspace.id });
-        handled.add(meeting.id);
+        await setSendEnabled(meeting.id, false);
       } catch (err: any) {
         if (!(err instanceof RecapNotConfiguredError)) {
           recapFailed.push({ meetingId: meeting.id, workspaceId: workspace.id, error: err.message });
@@ -191,8 +206,6 @@ export async function sendAssignedDigests(): Promise<SendResult> {
       }
     }
   }
-
-  await Promise.all(Array.from(handled).map((id) => setSendEnabled(id, false)));
 
   return { sent, skipped, recapPushed, recapFailed };
 }
