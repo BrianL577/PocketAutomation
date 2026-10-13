@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import { getMeetingsSince, type Meeting } from "./pocket";
 import { getAssignments } from "./assignments";
-import { getSendEnabled, setSendEnabled } from "./sendEnabled";
+import { getSendEnabled, setSendEnabled, getSent, markSent } from "./sendEnabled";
 import { getWorkspaces } from "./workspaces";
 import { pushRecapEntry, RecapNotConfiguredError } from "./recap";
 import { markdownToHtml } from "./markdown";
@@ -127,11 +127,12 @@ async function runSend(): Promise<SendResult> {
   since.setDate(since.getDate() - 7);
   since.setHours(0, 0, 0, 0);
 
-  const [meetings, assignments, sendEnabled, workspaces] = await Promise.all([
+  const [meetings, assignments, sendEnabled, workspaces, alreadySent] = await Promise.all([
     getMeetingsSince(since.toISOString()),
     getAssignments(),
     getSendEnabled(),
     getWorkspaces(),
+    getSent(),
   ]);
 
   const gmailAddress = process.env.GMAIL_ADDRESS;
@@ -145,7 +146,7 @@ async function runSend(): Promise<SendResult> {
   let transporter: nodemailer.Transporter | null = null;
 
   for (const meeting of meetings) {
-    if (sendEnabled[meeting.id] === false) {
+    if (sendEnabled[meeting.id] === false || alreadySent[meeting.id]) {
       skipped.push(meeting.id);
       continue;
     }
@@ -182,7 +183,7 @@ async function runSend(): Promise<SendResult> {
       // Flip the flag the moment the email is out, not at the end of the
       // run: if a later meeting throws or the function times out, this one
       // must already be marked so the next run doesn't send it again.
-      await setSendEnabled(meeting.id, false);
+      await Promise.all([setSendEnabled(meeting.id, false), markSent(meeting.id)]);
     }
 
     // The email (if any) already went out - a Recap hiccup shouldn't be
@@ -198,7 +199,7 @@ async function runSend(): Promise<SendResult> {
           tagNames: meeting.tags,
         });
         recapPushed.push({ meetingId: meeting.id, workspaceId: workspace.id });
-        await setSendEnabled(meeting.id, false);
+        await Promise.all([setSendEnabled(meeting.id, false), markSent(meeting.id)]);
       } catch (err: any) {
         if (!(err instanceof RecapNotConfiguredError)) {
           recapFailed.push({ meetingId: meeting.id, workspaceId: workspace.id, error: err.message });

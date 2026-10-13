@@ -13,6 +13,29 @@ export async function getSendEnabled(): Promise<Record<string, boolean>> {
   return raw ?? {};
 }
 
+const SENT_KEY = "sentAt";
+
+/** Durable record of which recordings have already gone out (id -> ISO time).
+ * The "included" toggle alone can't answer "was this already sent?": it
+ * defaults to true for anything missing from KV, so if that flag was ever
+ * lost, cleared by a bulk "select all", or never written because a run died
+ * midway, an already-delivered meeting looked brand new and went out again.
+ * Sending skips anything in here, and only an explicit per-meeting re-check
+ * (clearSent) lets it be sent again.
+ */
+export async function getSent(): Promise<Record<string, string>> {
+  const raw = await kv.hgetall<Record<string, string>>(SENT_KEY);
+  return raw ?? {};
+}
+
+export async function markSent(meetingId: string): Promise<void> {
+  await kv.hset(SENT_KEY, { [meetingId]: new Date().toISOString() });
+}
+
+export async function clearSent(meetingId: string): Promise<void> {
+  await kv.hdel(SENT_KEY, meetingId);
+}
+
 export async function setSendEnabled(meetingId: string, enabled: boolean): Promise<void> {
   await kv.hset(KEY, { [meetingId]: enabled });
 }
