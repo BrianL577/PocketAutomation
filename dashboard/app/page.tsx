@@ -120,6 +120,7 @@ function MeetingPanel({
   allRecipients,
   assigned,
   includedInSend,
+  sentAt,
   workspaces,
   recapWorkspaces,
   recapConfigured,
@@ -134,6 +135,7 @@ function MeetingPanel({
   allRecipients: string[];
   assigned: string[];
   includedInSend: boolean;
+  sentAt?: string;
   workspaces: MeetingWorkspace[];
   recapWorkspaces: RecapWorkspace[];
   recapConfigured: boolean;
@@ -182,9 +184,12 @@ function MeetingPanel({
         />
         <Chevron open={open} />
         <div className="panel-header-text">
-          <div className="panel-title">{meeting.title}</div>
+          <div className="panel-title">
+            {meeting.title}
+            {sentAt && <span className="tag-badge">Sent</span>}
+          </div>
           <div className="panel-meta">
-            {new Date(meeting.createdAt).toLocaleString()}
+            {new Date(meeting.createdAt).toLocaleString("en-US", { timeZone: "America/New_York", timeZoneName: "short" })}
             {meeting.tags.length > 0 && (
               <>
                 {" "}
@@ -340,6 +345,7 @@ export default function DashboardPage() {
   const [recipients, setRecipients] = useState<string[]>([]);
   const [assignments, setAssignments] = useState<Record<string, string[]>>({});
   const [sendEnabled, setSendEnabledState] = useState<Record<string, boolean>>({});
+  const [sent, setSent] = useState<Record<string, string>>({});
   const [tagRecipients, setTagRecipients] = useState<Record<string, string[]>>({});
   const [workspaces, setWorkspaces] = useState<Record<string, MeetingWorkspace[]>>({});
   const [recapWorkspaces, setRecapWorkspaces] = useState<RecapWorkspace[]>([]);
@@ -387,6 +393,7 @@ export default function DashboardPage() {
       setRecipients(recipientsRes.recipients ?? []);
       setAssignments(assignmentsRes.assignments ?? {});
       setSendEnabledState(sendEnabledRes.sendEnabled ?? {});
+      setSent(sendEnabledRes.sent ?? {});
       setTagRecipients(tagRecipientsRes.tagRecipients ?? {});
       // Defensive: normalize server data even though the API already should -
       // a meeting whose workspace list isn't an array (stale KV shape, bad
@@ -486,6 +493,12 @@ export default function DashboardPage() {
 
   async function persistSendEnabled(meetingId: string, enabled: boolean) {
     setSendEnabledState((prev) => ({ ...prev, [meetingId]: enabled }));
+    if (enabled) {
+      setSent((prev) => {
+        const { [meetingId]: _removed, ...rest } = prev;
+        return rest;
+      });
+    }
     await fetch("/api/send-enabled", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -499,8 +512,11 @@ export default function DashboardPage() {
   }
 
   function toggleSelectAllPanels() {
-    const allIncluded = meetings.every((m) => (sendEnabled[m.id] ?? true));
-    meetings.forEach((m) => persistSendEnabled(m.id, !allIncluded));
+    // Bulk select never touches meetings that were already sent - those can
+    // only be re-armed one at a time, so "Select all" can't resend history.
+    const unsent = meetings.filter((m) => !sent[m.id]);
+    const allIncluded = unsent.every((m) => (sendEnabled[m.id] ?? true));
+    unsent.forEach((m) => persistSendEnabled(m.id, !allIncluded));
   }
 
   async function handleSend() {
@@ -554,10 +570,11 @@ export default function DashboardPage() {
     .filter(
       (m) =>
         (sendEnabled[m.id] ?? true) &&
+        !sent[m.id] &&
         (effectiveRecipients(m).length > 0 || (workspaces[m.id]?.length ?? 0) > 0)
     )
     .map((m) => m.id);
-  const allPanelsIncluded = meetings.every((m) => sendEnabled[m.id] ?? true);
+  const allPanelsIncluded = meetings.filter((m) => !sent[m.id]).every((m) => sendEnabled[m.id] ?? true);
 
   return (
     <div className="page">
@@ -580,7 +597,8 @@ export default function DashboardPage() {
           meeting={m}
           allRecipients={recipients}
           assigned={effectiveRecipients(m)}
-          includedInSend={sendEnabled[m.id] ?? true}
+          includedInSend={(sendEnabled[m.id] ?? true) && !sent[m.id]}
+          sentAt={sent[m.id]}
           workspaces={workspaces[m.id] ?? []}
           recapWorkspaces={recapWorkspaces}
           recapConfigured={recapConfigured}

@@ -2,15 +2,30 @@ name: Daily digest send
 
 on:
   schedule:
-    # 5:00 AM ET (UTC-4 during EDT; adjust to "0 10 * * *" during EST)
+    # 5:00 AM ET. GitHub cron is UTC-only, so fire at both 09:00 and 10:00
+    # UTC (5 AM EDT / 5 AM EST) and let the guard step below skip the run
+    # that lands before 5 AM Eastern. Sends are idempotent, so a second
+    # in-window run is a no-op.
     - cron: "0 9 * * *"
+    - cron: "0 10 * * *"
   workflow_dispatch: {}
 
 jobs:
   send:
     runs-on: ubuntu-latest
     steps:
+      - name: Skip if before 5 AM Eastern
+        id: guard
+        run: |
+          hour=$(TZ=America/New_York date +%H)
+          echo "Eastern hour: $hour"
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$((10#$hour))" -lt 5 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Trigger dashboard cron endpoint
+        if: steps.guard.outputs.run == 'true'
         run: |
           status=$(curl -s -L -o /tmp/response.json -w "%{http_code}" \
             -X GET "${{ secrets.DASHBOARD_URL }}/api/cron/send" \
